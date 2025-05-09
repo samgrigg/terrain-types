@@ -9,6 +9,11 @@ from typing import Optional, List, Dict
 import json
 from urllib.parse import urlencode
 import time
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -117,17 +122,21 @@ async def get_activities(access_token: str, refresh_token: str, expires_at: int)
         
         # Fetch detailed activity data including map for each activity
         for activity in activities:
-            if activity.get("map", {}).get("summary_polyline"):
-                detail_response = requests.get(
-                    f"{STRAVA_API_URL}/activities/{activity['id']}",
-                    headers=headers
-                )
-                if detail_response.status_code == 200:
-                    detail_data = detail_response.json()
-                    activity["map"] = detail_data.get("map", {})
+            logger.info(f"Fetching details for activity {activity['id']}")
+            detail_response = requests.get(
+                f"{STRAVA_API_URL}/activities/{activity['id']}",
+                headers=headers
+            )
+            if detail_response.status_code == 200:
+                detail_data = detail_response.json()
+                logger.info(f"Activity {activity['id']} map data: {detail_data.get('map', {})}")
+                activity["map"] = detail_data.get("map", {})
+            else:
+                logger.error(f"Failed to fetch details for activity {activity['id']}: {detail_response.status_code}")
         
         return activities
     except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching activities: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/activities/download")

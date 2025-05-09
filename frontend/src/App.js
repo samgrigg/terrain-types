@@ -14,7 +14,7 @@ import {
   Grid,
 } from '@mui/material';
 import axios from 'axios';
-import ActivityMap from './ActivityMap';
+import ActivityMap from './components/ActivityMap';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
