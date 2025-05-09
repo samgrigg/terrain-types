@@ -123,29 +123,29 @@ async def get_activities(access_token: str, refresh_token: str, expires_at: int)
         # Fetch detailed activity data including map for each activity
         for activity in activities:
             logger.info(f"Fetching details for activity {activity['id']}")
+            # Request detailed activity data including segment efforts
             detail_response = requests.get(
                 f"{STRAVA_API_URL}/activities/{activity['id']}",
-                headers=headers
+                headers=headers,
+                params={"include_all_efforts": "true"}  # Include all segment efforts
             )
             if detail_response.status_code == 200:
                 detail_data = detail_response.json()
                 activity["map"] = detail_data.get("map", {})
                 
-                # Log detailed information about the activity
-                logger.info(f"Activity {activity['id']} details:")
-                logger.info(f"  Name: {activity['name']}")
-                logger.info(f"  Type: {activity['type']}")
-                logger.info(f"  Start Date: {activity['start_date']}")
-                logger.info(f"  Manual: {activity.get('manual', False)}")
-                logger.info(f"  Trainer: {activity.get('trainer', False)}")
-                logger.info(f"  Has Map: {'map' in detail_data}")
-                logger.info(f"  Has Polyline: {'polyline' in detail_data.get('map', {})}")
-                logger.info(f"  Has Summary Polyline: {'summary_polyline' in detail_data.get('map', {})}")
+                # Log segment data if available
+                if "segment_efforts" in detail_data:
+                    logger.info(f"Activity {activity['id']} has {len(detail_data['segment_efforts'])} segments")
+                    for segment in detail_data["segment_efforts"]:
+                        logger.info(f"  Segment: {segment.get('name')} - {segment.get('segment', {}).get('id')}")
+                else:
+                    logger.info(f"Activity {activity['id']} has no segments")
                 
-                if not detail_data.get('map', {}).get('polyline'):
-                    logger.warning(f"Activity {activity['id']} is missing polyline data")
+                # Include segment data in the response
+                activity["segments"] = detail_data.get("segment_efforts", [])
             else:
                 logger.error(f"Failed to fetch details for activity {activity['id']}: {detail_response.status_code}")
+                logger.error(f"Response: {detail_response.text}")
         
         return activities
     except requests.exceptions.RequestException as e:

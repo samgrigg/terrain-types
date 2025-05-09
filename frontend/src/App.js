@@ -76,6 +76,11 @@ function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const clearActivityCache = () => {
+    localStorage.removeItem('strava_activities');
+    localStorage.removeItem('strava_activities_last_fetch');
+  };
+
   useEffect(() => {
     // Check for authentication error in URL
     const urlParams = new URLSearchParams(location.search);
@@ -145,6 +150,11 @@ function MainApp() {
     window.location.href = authUrl;
   };
 
+  const handleRefresh = () => {
+    clearActivityCache();
+    loadActivities();
+  };
+
   const handleDownload = async () => {
     try {
       const access_token = localStorage.getItem('strava_token');
@@ -202,14 +212,22 @@ function MainApp() {
           </Button>
         ) : (
           <Box>
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={handleDownload}
-              sx={{ mt: 2, mb: 4 }}
-            >
-              Download Activities
-            </Button>
+            <Box sx={{ display: 'flex', gap: 2, mb: 4 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleDownload}
+              >
+                Download Activities
+              </Button>
+              <Button
+                variant="outlined"
+                color="primary"
+                onClick={handleRefresh}
+              >
+                Refresh Activities
+              </Button>
+            </Box>
 
             {loading ? (
               <CircularProgress />
