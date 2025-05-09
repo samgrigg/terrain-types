@@ -94,6 +94,7 @@ function decodePolyline(polyline) {
     let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
     lng += dlng;
 
+    // Swap lat/lng order to match Leaflet's expected format [lat, lng]
     points.push([lat * 1e-5, lng * 1e-5]);
   }
 
