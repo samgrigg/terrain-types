@@ -5,9 +5,10 @@ from pydantic import BaseModel
 import requests
 import os
 from dotenv import load_dotenv
-from typing import Optional, List
+from typing import Optional, List, Dict
 import json
 from urllib.parse import urlencode
+import time
 
 load_dotenv()
 
@@ -42,6 +43,33 @@ class Activity(BaseModel):
     type: str
     start_date: str
     description: Optional[str] = None
+    map: Optional[dict] = None
+
+def refresh_access_token(refresh_token: str) -> Dict:
+    """Refresh the Strava access token using the refresh token."""
+    try:
+        response = requests.post(
+            "https://www.strava.com/oauth/token",
+            data={
+                "client_id": STRAVA_CLIENT_ID,
+                "client_secret": STRAVA_CLIENT_SECRET,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token"
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=400, detail=f"Failed to refresh token: {str(e)}")
+
+def get_valid_token(access_token: str, refresh_token: str, expires_at: int) -> str:
+    """Get a valid access token, refreshing if necessary."""
+    # Check if token is expired or about to expire (within 5 minutes)
+    if time.time() >= expires_at - 300:
+        # Token is expired or about to expire, refresh it
+        new_token_data = refresh_access_token(refresh_token)
+        return new_token_data["access_token"]
+    return access_token
 
 @app.get("/api/auth/callback")
 async def strava_callback(code: str):
@@ -73,24 +101,42 @@ async def strava_callback(code: str):
         return RedirectResponse(f"{FRONTEND_URL}/auth/error?error={str(e)}")
 
 @app.get("/api/activities")
-async def get_activities(access_token: str):
+async def get_activities(access_token: str, refresh_token: str, expires_at: int):
     try:
-        headers = {"Authorization": f"Bearer {access_token}"}
+        # Get a valid access token
+        valid_token = get_valid_token(access_token, refresh_token, expires_at)
+        
+        headers = {"Authorization": f"Bearer {valid_token}"}
         response = requests.get(
             f"{STRAVA_API_URL}/athlete/activities",
-            headers=headers
+            headers=headers,
+            params={"per_page": 30}  # Limit to 30 activities for performance
         )
         response.raise_for_status()
         activities = response.json()
+        
+        # Fetch detailed activity data including map for each activity
+        for activity in activities:
+            if activity.get("map", {}).get("summary_polyline"):
+                detail_response = requests.get(
+                    f"{STRAVA_API_URL}/activities/{activity['id']}",
+                    headers=headers
+                )
+                if detail_response.status_code == 200:
+                    detail_data = detail_response.json()
+                    activity["map"] = detail_data.get("map", {})
         
         return activities
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/activities/download")
-async def download_activities(access_token: str):
+async def download_activities(access_token: str, refresh_token: str, expires_at: int):
     try:
-        headers = {"Authorization": f"Bearer {access_token}"}
+        # Get a valid access token
+        valid_token = get_valid_token(access_token, refresh_token, expires_at)
+        
+        headers = {"Authorization": f"Bearer {valid_token}"}
         response = requests.get(
             f"{STRAVA_API_URL}/athlete/activities",
             headers=headers

@@ -11,8 +11,10 @@ import {
   CircularProgress,
   Paper,
   Alert,
+  Grid,
 } from '@mui/material';
 import axios from 'axios';
+import ActivityMap from './ActivityMap';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -68,6 +70,7 @@ function AuthError() {
 function MainApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activities, setActivities] = useState([]);
+  const [selectedActivity, setSelectedActivity] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -85,7 +88,7 @@ function MainApp() {
     const token = localStorage.getItem('strava_token');
     if (token) {
       setIsAuthenticated(true);
-      fetchActivities(token);
+      fetchActivities();
     }
   }, [location]);
 
@@ -97,11 +100,19 @@ function MainApp() {
     window.location.href = authUrl;
   };
 
-  const fetchActivities = async (token) => {
+  const fetchActivities = async () => {
     try {
       setLoading(true);
+      const access_token = localStorage.getItem('strava_token');
+      const refresh_token = localStorage.getItem('strava_refresh_token');
+      const expires_at = localStorage.getItem('strava_token_expires_at');
+
       const response = await axios.get(`${API_URL}/api/activities`, {
-        params: { access_token: token }
+        params: {
+          access_token,
+          refresh_token,
+          expires_at
+        }
       });
       setActivities(response.data);
       setError(null);
@@ -115,9 +126,16 @@ function MainApp() {
 
   const handleDownload = async () => {
     try {
-      const token = localStorage.getItem('strava_token');
+      const access_token = localStorage.getItem('strava_token');
+      const refresh_token = localStorage.getItem('strava_refresh_token');
+      const expires_at = localStorage.getItem('strava_token_expires_at');
+
       const response = await axios.get(`${API_URL}/api/activities/download`, {
-        params: { access_token: token },
+        params: {
+          access_token,
+          refresh_token,
+          expires_at
+        },
         responseType: 'blob'
       });
 
@@ -135,8 +153,12 @@ function MainApp() {
     }
   };
 
+  const handleActivityClick = (activity) => {
+    setSelectedActivity(activity);
+  };
+
   return (
-    <Container maxWidth="md">
+    <Container maxWidth="lg">
       <Box sx={{ my: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom>
           Strava Activity Downloader
@@ -171,21 +193,46 @@ function MainApp() {
             {loading ? (
               <CircularProgress />
             ) : (
-              <Paper elevation={3} sx={{ p: 2 }}>
-                <Typography variant="h6" gutterBottom>
-                  Your Activities
-                </Typography>
-                <List>
-                  {activities.map((activity) => (
-                    <ListItem key={activity.id}>
-                      <ListItemText
-                        primary={activity.name}
-                        secondary={`${activity.type} - ${new Date(activity.start_date).toLocaleDateString()}`}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              </Paper>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={4}>
+                  <Paper elevation={3} sx={{ p: 2, maxHeight: '800px', overflow: 'auto' }}>
+                    <Typography variant="h6" gutterBottom>
+                      Your Activities
+                    </Typography>
+                    <List>
+                      {activities.map((activity) => (
+                        <ListItem
+                          key={activity.id}
+                          button
+                          selected={selectedActivity?.id === activity.id}
+                          onClick={() => handleActivityClick(activity)}
+                        >
+                          <ListItemText
+                            primary={activity.name}
+                            secondary={`${activity.type} - ${new Date(activity.start_date).toLocaleDateString()}`}
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={8}>
+                  <Paper elevation={3} sx={{ p: 2 }}>
+                    {selectedActivity ? (
+                      <>
+                        <Typography variant="h6" gutterBottom>
+                          {selectedActivity.name}
+                        </Typography>
+                        <ActivityMap activity={selectedActivity} />
+                      </>
+                    ) : (
+                      <Box sx={{ p: 2, textAlign: 'center' }}>
+                        Select an activity to view its route
+                      </Box>
+                    )}
+                  </Paper>
+                </Grid>
+              </Grid>
             )}
           </Box>
         )}
