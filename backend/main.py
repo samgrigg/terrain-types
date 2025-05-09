@@ -129,8 +129,21 @@ async def get_activities(access_token: str, refresh_token: str, expires_at: int)
             )
             if detail_response.status_code == 200:
                 detail_data = detail_response.json()
-                logger.info(f"Activity {activity['id']} map data: {detail_data.get('map', {})}")
                 activity["map"] = detail_data.get("map", {})
+                
+                # Log detailed information about the activity
+                logger.info(f"Activity {activity['id']} details:")
+                logger.info(f"  Name: {activity['name']}")
+                logger.info(f"  Type: {activity['type']}")
+                logger.info(f"  Start Date: {activity['start_date']}")
+                logger.info(f"  Manual: {activity.get('manual', False)}")
+                logger.info(f"  Trainer: {activity.get('trainer', False)}")
+                logger.info(f"  Has Map: {'map' in detail_data}")
+                logger.info(f"  Has Polyline: {'polyline' in detail_data.get('map', {})}")
+                logger.info(f"  Has Summary Polyline: {'summary_polyline' in detail_data.get('map', {})}")
+                
+                if not detail_data.get('map', {}).get('polyline'):
+                    logger.warning(f"Activity {activity['id']} is missing polyline data")
             else:
                 logger.error(f"Failed to fetch details for activity {activity['id']}: {detail_response.status_code}")
         

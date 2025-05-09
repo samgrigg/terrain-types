@@ -88,21 +88,29 @@ function MainApp() {
     const token = localStorage.getItem('strava_token');
     if (token) {
       setIsAuthenticated(true);
-      fetchActivities();
+      loadActivities();
     }
   }, [location]);
 
-  const handleStravaAuth = () => {
-    const clientId = process.env.REACT_APP_STRAVA_CLIENT_ID;
-    const redirectUri = `${API_URL}/api/auth/callback`;
-    const scope = 'read,activity:read';
-    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&approval_prompt=force&scope=${scope}`;
-    window.location.href = authUrl;
-  };
-
-  const fetchActivities = async () => {
+  const loadActivities = async () => {
     try {
       setLoading(true);
+      
+      // Check if we have cached activities
+      const cachedActivities = localStorage.getItem('strava_activities');
+      const lastFetchTime = localStorage.getItem('strava_activities_last_fetch');
+      const now = Date.now();
+      
+      // If we have cached activities and they're less than 5 minutes old, use them
+      if (cachedActivities && lastFetchTime && (now - parseInt(lastFetchTime)) < 5 * 60 * 1000) {
+        console.log('Using cached activities');
+        setActivities(JSON.parse(cachedActivities));
+        setError(null);
+        return;
+      }
+
+      // Otherwise, fetch new activities
+      console.log('Fetching new activities from Strava');
       const access_token = localStorage.getItem('strava_token');
       const refresh_token = localStorage.getItem('strava_refresh_token');
       const expires_at = localStorage.getItem('strava_token_expires_at');
@@ -114,6 +122,11 @@ function MainApp() {
           expires_at
         }
       });
+      
+      // Cache the new activities
+      localStorage.setItem('strava_activities', JSON.stringify(response.data));
+      localStorage.setItem('strava_activities_last_fetch', now.toString());
+      
       setActivities(response.data);
       setError(null);
     } catch (err) {
@@ -122,6 +135,14 @@ function MainApp() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleStravaAuth = () => {
+    const clientId = process.env.REACT_APP_STRAVA_CLIENT_ID;
+    const redirectUri = `${API_URL}/api/auth/callback`;
+    const scope = 'read,activity:read';
+    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&approval_prompt=force&scope=${scope}`;
+    window.location.href = authUrl;
   };
 
   const handleDownload = async () => {
