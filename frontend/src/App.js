@@ -76,6 +76,10 @@ function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Get segment ID from URL if present
+  const urlParams = new URLSearchParams(location.search);
+  const segmentId = urlParams.get('segment');
+
   const clearActivityCache = () => {
     localStorage.removeItem('strava_activities');
     localStorage.removeItem('strava_activities_last_fetch');
@@ -83,7 +87,6 @@ function MainApp() {
 
   useEffect(() => {
     // Check for authentication error in URL
-    const urlParams = new URLSearchParams(location.search);
     const authError = urlParams.get('error');
     if (authError) {
       setError('Authentication failed. Please try again.');
@@ -186,6 +189,13 @@ function MainApp() {
 
   const handleActivityClick = (activity) => {
     setSelectedActivity(activity);
+    // Clear segment from URL when selecting a new activity
+    navigate(`/?activity=${activity.id}`);
+  };
+
+  const handleSegmentClick = (segmentId) => {
+    // Update URL with segment ID
+    navigate(`/?activity=${selectedActivity.id}&segment=${segmentId}`);
   };
 
   return (
@@ -262,7 +272,11 @@ function MainApp() {
                         <Typography variant="h6" gutterBottom>
                           {selectedActivity.name}
                         </Typography>
-                        <ActivityMap activity={selectedActivity} />
+                        <ActivityMap 
+                          activity={selectedActivity} 
+                          selectedSegmentId={segmentId}
+                          onSegmentClick={handleSegmentClick}
+                        />
                       </>
                     ) : (
                       <Box sx={{ p: 2, textAlign: 'center' }}>

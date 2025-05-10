@@ -10,6 +10,8 @@ import json
 from urllib.parse import urlencode
 import time
 import logging
+from polyline import decode
+import math
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +36,9 @@ STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
+# Overpass API configuration
+OVERPASS_API_URL = "https://overpass-api.de/api/interpreter"
+
 class StravaToken(BaseModel):
     access_token: str
     refresh_token: str
@@ -49,6 +54,14 @@ class Activity(BaseModel):
     start_date: str
     description: Optional[str] = None
     map: Optional[dict] = None
+
+class TerrainQuery(BaseModel):
+    start_lat: float
+    start_lon: float
+    end_lat: float
+    end_lon: float
+    polyline: Optional[str] = None  # Add polyline data
+    distance_threshold: float = 0.0001  # Default threshold in degrees (roughly 10 meters)
 
 def refresh_access_token(refresh_token: str) -> Dict:
     """Refresh the Strava access token using the refresh token."""
@@ -174,6 +187,187 @@ async def download_activities(access_token: str, refresh_token: str, expires_at:
             }
         )
     except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/terrain")
+async def get_terrain_info(query: TerrainQuery):
+    try:
+        logger.info(f"Processing terrain query: {query}")
+        
+        # Create a bounding box around the segment with some padding
+        min_lat = min(query.start_lat, query.end_lat) - 0.001
+        max_lat = max(query.start_lat, query.end_lat) + 0.001
+        min_lon = min(query.start_lon, query.end_lon) - 0.001
+        max_lon = max(query.start_lon, query.end_lon) + 0.001
+
+        logger.info(f"Query bounding box: ({min_lat}, {min_lon}) to ({max_lat}, {max_lon})")
+
+        # Construct Overpass QL query
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          // Get surface types
+          way["surface"]({min_lat},{min_lon},{max_lat},{max_lon});
+          // Get track types
+          way["tracktype"]({min_lat},{min_lon},{max_lat},{max_lon});
+          // Get highway types
+          way["highway"]({min_lat},{min_lon},{max_lat},{max_lon});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+
+        # Make request to Overpass API
+        response = requests.post(
+            OVERPASS_API_URL,
+            data=overpass_query,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+        )
+        response.raise_for_status()
+        
+        # Process the response
+        data = response.json()
+        elements = data.get('elements', [])
+        logger.info(f"Received {len(elements)} elements from Overpass API")
+        
+        terrain_info = {
+            'surfaces': set(),
+            'tracktypes': set(),
+            'highways': set(),
+            'surface_distances': {}  # Track distance for each surface type
+        }
+
+        # If we have polyline data, decode it for path matching
+        segment_points = []
+        if query.polyline:
+            segment_points = decode(query.polyline)
+            logger.info(f"Decoded polyline into {len(segment_points)} points")
+
+        # Extract terrain information from the response
+        for element in elements:
+            if element.get('type') == 'way':
+                logger.info(f"Processing way element: {element.get('id')} with tags: {element.get('tags', {})}")
+                
+                # Get the nodes of this way
+                way_nodes = []
+                for node in elements:
+                    if node.get('type') == 'node' and node.get('id') in element.get('nodes', []):
+                        way_nodes.append((node.get('lat'), node.get('lon')))
+
+                logger.info(f"Found {len(way_nodes)} nodes for way {element.get('id')}")
+
+                # If we have segment points, check if this way is close to the segment
+                if segment_points and way_nodes:
+                    # Calculate the distance of overlap between the way and the segment
+                    overlap_distance = 0
+                    for i in range(len(segment_points) - 1):
+                        seg_start = segment_points[i]
+                        seg_end = segment_points[i + 1]
+                        
+                        # Check if this segment part overlaps with any part of the way
+                        for j in range(len(way_nodes) - 1):
+                            way_start = way_nodes[j]
+                            way_end = way_nodes[j + 1]
+                            
+                            # Check if either end of the way segment is close to the segment
+                            start_close = (abs(way_start[0] - seg_start[0]) <= query.distance_threshold and 
+                                        abs(way_start[1] - seg_start[1]) <= query.distance_threshold)
+                            end_close = (abs(way_end[0] - seg_end[0]) <= query.distance_threshold and 
+                                      abs(way_end[1] - seg_end[1]) <= query.distance_threshold)
+                            
+                            # If either end is close, calculate the distance
+                            if start_close or end_close:
+                                # Calculate the distance of this way segment
+                                R = 6371000  # Earth's radius in meters
+                                lat1, lon1 = math.radians(way_start[0]), math.radians(way_start[1])
+                                lat2, lon2 = math.radians(way_end[0]), math.radians(way_end[1])
+                                dlat = lat2 - lat1
+                                dlon = lon2 - lon1
+                                a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+                                c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                                distance = R * c
+                                
+                                # If both ends are close, use the full distance
+                                # If only one end is close, use half the distance
+                                if start_close and end_close:
+                                    overlap_distance += distance
+                                else:
+                                    overlap_distance += distance / 2
+                                
+                                logger.info(f"Found overlap: way segment {j} to {j+1} with segment part {i} to {i+1}")
+                                logger.info(f"Way points: {way_start} to {way_end}")
+                                logger.info(f"Segment points: {seg_start} to {seg_end}")
+                                logger.info(f"Distance added: {distance}m")
+
+                    logger.info(f"Calculated total overlap distance for way {element.get('id')}: {overlap_distance}m")
+
+                    # Only include terrain data if there's significant overlap
+                    if overlap_distance > 0:
+                        tags = element.get('tags', {})
+                        if 'surface' in tags:
+                            surface = tags['surface']
+                            terrain_info['surfaces'].add(surface)
+                            terrain_info['surface_distances'][surface] = terrain_info['surface_distances'].get(surface, 0) + overlap_distance
+                            logger.info(f"Added surface {surface} with distance {overlap_distance}m")
+                        if 'tracktype' in tags:
+                            terrain_info['tracktypes'].add(tags['tracktype'])
+                            logger.info(f"Added tracktype {tags['tracktype']}")
+                        if 'highway' in tags:
+                            terrain_info['highways'].add(tags['highway'])
+                            logger.info(f"Added highway {tags['highway']}")
+
+        # Calculate total distance and natural surface percentage
+        total_distance = sum(terrain_info['surface_distances'].values())
+        natural_surfaces = ['gravel', 'wood', 'unpaved', 'dirt', 'ground', 'grass', 'sand', 'earth']
+        natural_distance = sum(
+            distance for surface, distance in terrain_info['surface_distances'].items()
+            if any(natural in surface.lower() for natural in natural_surfaces)
+        )
+        natural_percentage = (natural_distance / total_distance * 100) if total_distance > 0 else 0
+
+        logger.info(f"Total distance: {total_distance}m")
+        logger.info(f"Natural distance: {natural_distance}m")
+        logger.info(f"Natural percentage: {natural_percentage}%")
+        logger.info(f"Surface distances: {terrain_info['surface_distances']}")
+
+        # Convert sets to lists for JSON serialization
+        result = {
+            'surfaces': list(terrain_info['surfaces']),
+            'tracktypes': list(terrain_info['tracktypes']),
+            'highways': list(terrain_info['highways']),
+            'surface_distances': terrain_info['surface_distances'],
+            'natural_percentage': round(natural_percentage, 1)
+        }
+        
+        logger.info(f"Returning result: {result}")
+        return result
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error querying Overpass API: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to query terrain information: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in get_terrain_info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+@app.get("/api/segment/{segment_id}")
+async def get_segment_details(segment_id: int, access_token: str, refresh_token: str, expires_at: int):
+    try:
+        # Get a valid access token
+        valid_token = get_valid_token(access_token, refresh_token, expires_at)
+        
+        headers = {"Authorization": f"Bearer {valid_token}"}
+        response = requests.get(
+            f"{STRAVA_API_URL}/segments/{segment_id}",
+            headers=headers
+        )
+        response.raise_for_status()
+        segment_data = response.json()
+        
+        logger.info(f"Fetched detailed segment data for segment {segment_id}")
+        return segment_data
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching segment details: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 if __name__ == "__main__":
