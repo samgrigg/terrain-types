@@ -18,6 +18,16 @@ import ActivityMap from './components/ActivityMap';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
+/**
+ * TODO
+ * - Surfaces aren't making sense yet - known mtb trails are coming back as asphalt. Need to breatk out the Overpass queries to manually inspect.
+ * - For the purposes of this app, we want to work with the longest segments only. Shorter, overlapping segments should be ignored.
+ * - Need to break things out into functions - I have no idea what's going on in this code.
+ */
+
+
+
+
 function AuthSuccess() {
   const navigate = useNavigate();
   const location = useLocation();
