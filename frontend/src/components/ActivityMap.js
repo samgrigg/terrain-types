@@ -13,7 +13,8 @@ import {
     Paper,
     Typography,
     Box,
-    CircularProgress
+    CircularProgress,
+    Divider
 } from '@mui/material';
 import { getTerrainData, formatTerrainInfo } from '../utils/terrainUtils';
 import {
@@ -73,6 +74,8 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
     const mapInstanceRef = useRef(null);
     const [segmentData, setSegmentData] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [wayMatches, setWayMatches] = useState(null);
+    const [wayMatchesLoading, setWayMatchesLoading] = useState(false);
 
     const handleSegmentSelection = async (segment, index, totalSegments) => {
         setLoading(true);
@@ -95,6 +98,27 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
                 highways: terrainData?.highways?.join(', ') || 'N/A',
                 natural_percentage: terrainData?.natural_percentage
             });
+
+            // Fetch way matches
+            setWayMatchesLoading(true);
+            try {
+                const response = await fetch(
+                    `${API_URL}/osm/match/${segment.segment.id}`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${tokens.access_token}`
+                        }
+                    }
+                );
+                if (!response.ok) throw new Error('Failed to fetch way matches');
+                const matches = await response.json();
+                setWayMatches(matches);
+            } catch (error) {
+                console.error('Error fetching way matches:', error);
+                setWayMatches([]);
+            } finally {
+                setWayMatchesLoading(false);
+            }
 
             return terrainInfo;
         } catch (error) {
@@ -157,6 +181,68 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
                                 <TableCell>{segmentData.tracktypes}</TableCell>
                                 <TableCell>{segmentData.highways}</TableCell>
                             </TableRow>
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+            </>
+        );
+    };
+
+    const renderWayMatches = () => {
+        if (!selectedSegmentId) return null;
+
+        if (wayMatchesLoading) {
+            return (
+                <Box display="flex" justifyContent="center" my={2}>
+                    <CircularProgress />
+                </Box>
+            );
+        }
+
+        if (!wayMatches || wayMatches.length === 0) {
+            return (
+                <Typography variant="body1" align="center" my={2}>
+                    No matching OSM ways found
+                </Typography>
+            );
+        }
+
+        return (
+            <>
+                <Typography variant="h6" gutterBottom>
+                    Matching OSM Ways
+                </Typography>
+                <TableContainer component={Paper}>
+                    <Table size="small">
+                        <TableHead>
+                            <TableRow>
+                                <TableCell>OSM ID</TableCell>
+                                <TableCell>Highway Type</TableCell>
+                                <TableCell>Match Type</TableCell>
+                                <TableCell align="right">Distance</TableCell>
+                                <TableCell align="right">Confidence</TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {wayMatches.map((match) => (
+                                <TableRow key={match.way.id}>
+                                    <TableCell>
+                                        <a
+                                            href={`https://www.openstreetmap.org/way/${match.way.id}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                        >
+                                            {match.way.id}
+                                        </a>
+                                    </TableCell>
+                                    <TableCell>{match.way.tags.highway || 'unknown'}</TableCell>
+                                    <TableCell>{match.match_type}</TableCell>
+                                    <TableCell align="right">{match.distance.toFixed(1)}m</TableCell>
+                                    <TableCell align="right">
+                                        {(match.confidence * 100).toFixed(0)}%
+                                    </TableCell>
+                                </TableRow>
+                            ))}
                         </TableBody>
                     </Table>
                 </TableContainer>
@@ -246,6 +332,12 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
                 }}
             />
             {renderSegmentDetails()}
+            {selectedSegmentId && (
+                <>
+                    <Divider sx={{ my: 2 }} />
+                    {renderWayMatches()}
+                </>
+            )}
         </Box>
     );
 };
