@@ -17,7 +17,7 @@ import {
     CircularProgress,
     Divider
 } from '@mui/material';
-import { getTerrainData, formatTerrainInfo } from '../utils/terrainUtils';
+import { getTerrainData, formatTerrainInfo, fetchTerrainData } from '../utils/terrainUtils';
 import {
     initializeMap,
     clearMapLayers,
@@ -90,15 +90,18 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
             const terrainData = await getTerrainData(segment, tokens);
             const terrainInfo = formatTerrainInfo(terrainData);
 
-            // setSegmentData({
-            //     name: segment.name,
-            //     length: (segment.segment.distance / 1000).toFixed(2),
-            //     position: index + 1,
-            //     surfaces: terrainData?.surfaces?.join(', ') || 'N/A',
-            //     tracktypes: terrainData?.tracktypes?.join(', ') || 'N/A',
-            //     highways: terrainData?.highways?.join(', ') || 'N/A',
-            //     natural_percentage: terrainData?.natural_percentage
-            // });
+            setSegmentData(prevData => ({
+                ...prevData,
+                [segment.id]: {
+                    name: segment.name,
+                    length: (segment.segment.distance / 1000).toFixed(2),
+                    position: index + 1,
+                    surfaces: terrainData?.surfaces?.join(', ') || 'N/A',
+                    tracktypes: terrainData?.tracktypes?.join(', ') || 'N/A', 
+                    highways: terrainData?.highways?.join(', ') || 'N/A',
+                    natural_percentage: terrainData?.natural_percentage
+                }
+            }));
 
             // Fetch way matches
             setWayMatchesLoading(true);
@@ -174,19 +177,9 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
                 });
 
                 // Get terrain data for segment
-                // const terrainResponse = await fetch(
-                //     `${API_URL}/api/terrain`,
-                //     {
-                //         method: 'POST',
-                //         headers: {
-                //             'Content-Type': 'application/json',
-                //             'Authorization': `Bearer ${tokens.access_token}`
-                //         },
-                //         body: JSON.stringify({
-                //             polyline: segmentDetails.map.polyline
-                //         })
-                //     }
-                // );
+                const terrainResponse = await getTerrainData(segmentDetails, tokens);
+
+                console.log("Terrain response", terrainResponse);
 
                 // if (!terrainResponse.ok) {
                 //     throw new Error(`Failed to fetch terrain for segment ${segment.segment.id}`);
@@ -197,7 +190,7 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
                 // Process and store segment data
                 // await processSegmentData(segment, terrainData);
             } catch (error) {
-                console.error(`Error processing segment ${segment.segment.id}:`, error);
+                console.error(`Error processing segment ${segment.id}:`, error);
             }
         }
 
@@ -229,7 +222,7 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
         return (
             <>
                 <Typography variant="h6" gutterBottom>
-                    Activity Segments
+                    Activity Segments ({Object.keys(segmentData).length})
                 </Typography>
                 
                 <TableContainer component={Paper}>
@@ -238,7 +231,8 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
                             <TableRow>
                                 <TableCell>#</TableCell>
                                 <TableCell>Name</TableCell>
-                                <TableCell align="right">Length (km)</TableCell>
+                                <TableCell align="right">Distance (m)</TableCell>
+                                <TableCell>Has Map?</TableCell>
                                 <TableCell align="right">Natural Surface %</TableCell>
                                 <TableCell>Surface Type</TableCell>
                                 <TableCell>Track Type</TableCell>
@@ -248,11 +242,12 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
                         <TableBody>
                             {Object.values(segmentData).map((segment, index) => (
                             <TableRow key={index}>
-                                <TableCell>{segment.position}</TableCell>
+                                <TableCell>{index + 1}</TableCell>
                                 <TableCell component="th" scope="row">
                                     {segment.name}
                                 </TableCell>
                                 <TableCell align="right">{segment.distance}m</TableCell>
+                                <TableCell>{segment.map ? 'Yes' : 'No'}</TableCell>
                                 <TableCell align="right">
                                     {segment.natural_percentage !== undefined ? 
                                         `${segment.natural_percentage}%` : 

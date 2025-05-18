@@ -58,11 +58,11 @@ export const cacheTerrainData = (segmentId, data) => {
 
 export const fetchTerrainData = async (segment) => {
     const response = await axios.post(`${API_URL}/api/terrain`, {
-        start_lat: segment.segment.start_latlng[0],
-        start_lon: segment.segment.start_latlng[1],
-        end_lat: segment.segment.end_latlng[0],
-        end_lon: segment.segment.end_latlng[1],
-        polyline: segment.segment.map?.polyline,
+        start_lat: segment.start_latlng[0],
+        start_lon: segment.start_latlng[1],
+        end_lat: segment.end_latlng[0],
+        end_lon: segment.end_latlng[1],
+        polyline: segment.map?.polyline,
         distance_threshold: 0.0001
     });
     return response.data;
@@ -105,23 +105,23 @@ export const formatTerrainInfo = (terrainData) => {
 export const getTerrainData = async (segment, tokens) => {
     try {
         // Fetch detailed segment data if needed
-        await fetchDetailedSegmentData(segment, tokens);
+        // await fetchDetailedSegmentData(segment, tokens);
 
         // Check for required data
-        if (!segment.segment.start_latlng || !segment.segment.end_latlng) {
-            console.warn('Segment missing start/end coordinates:', segment.segment);
+        if (!segment.start_latlng || !segment.end_latlng) {
+            console.warn('Segment missing start/end coordinates:', segment);
             return null;
         }
 
         // Check cache
-        const cachedData = getCachedTerrainData(segment.segment.id);
+        const cachedData = getCachedTerrainData(segment.id);
         if (cachedData) {
             return cachedData;
         }
 
         // Fetch and cache new data
         const terrainData = await fetchTerrainData(segment);
-        cacheTerrainData(segment.segment.id, terrainData);
+        cacheTerrainData(segment.id, terrainData);
         return terrainData;
     } catch (error) {
         console.error('Error fetching terrain data:', error);
