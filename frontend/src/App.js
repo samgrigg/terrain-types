@@ -94,7 +94,7 @@ function MainApp() {
 
   const handleActivityClick = useCallback(async (activity, updateUrl = false) => {
     try {
-      // setLoading(true);
+      setLoading(true);
       const access_token = localStorage.getItem('strava_token');
       const refresh_token = localStorage.getItem('strava_refresh_token');
       const expires_at = localStorage.getItem('strava_token_expires_at');

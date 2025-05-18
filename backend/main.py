@@ -325,7 +325,6 @@ async def get_activity_details(
         activity = response.json()
 
         logger.info(f"Fetched activity details for activity {activity_id}")
-        logger.info(f"Activity: {json.dumps(activity, indent=2)}")
         
         # Extract relevant data including segments
         activity_details = {

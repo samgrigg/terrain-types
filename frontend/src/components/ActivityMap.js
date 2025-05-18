@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { decode } from '@mapbox/polyline';
 import axios from 'axios';
 import {
+    Button,
     Table,
     TableBody,
     TableCell,
@@ -72,7 +73,7 @@ const calculateNaturalSurfacePercentage = (surfaces) => {
 const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
     const mapRef = useRef(null);
     const mapInstanceRef = useRef(null);
-    const [segmentData, setSegmentData] = useState(null);
+    const [segmentData, setSegmentData] = useState({});
     const [loading, setLoading] = useState(false);
     const [wayMatches, setWayMatches] = useState(null);
     const [wayMatchesLoading, setWayMatchesLoading] = useState(false);
@@ -89,15 +90,15 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
             const terrainData = await getTerrainData(segment, tokens);
             const terrainInfo = formatTerrainInfo(terrainData);
 
-            setSegmentData({
-                name: segment.name,
-                length: (segment.segment.distance / 1000).toFixed(2),
-                position: index + 1,
-                surfaces: terrainData?.surfaces?.join(', ') || 'N/A',
-                tracktypes: terrainData?.tracktypes?.join(', ') || 'N/A',
-                highways: terrainData?.highways?.join(', ') || 'N/A',
-                natural_percentage: terrainData?.natural_percentage
-            });
+            // setSegmentData({
+            //     name: segment.name,
+            //     length: (segment.segment.distance / 1000).toFixed(2),
+            //     position: index + 1,
+            //     surfaces: terrainData?.surfaces?.join(', ') || 'N/A',
+            //     tracktypes: terrainData?.tracktypes?.join(', ') || 'N/A',
+            //     highways: terrainData?.highways?.join(', ') || 'N/A',
+            //     natural_percentage: terrainData?.natural_percentage
+            // });
 
             // Fetch way matches
             setWayMatchesLoading(true);
@@ -129,6 +130,79 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
         }
     };
 
+    const handleLoadSegments = useCallback(async () => {
+        // Get tokens for API call
+        const tokens = {
+            access_token: localStorage.getItem('strava_token'),
+            refresh_token: localStorage.getItem('strava_refresh_token'), 
+            expires_at: localStorage.getItem('strava_token_expires_at')
+        };
+
+        // Process each segment
+        for (const segment of activity.segments) {
+            console.log("Segment", segment);
+            try {
+                // Check if segment details are in localStorage
+                const cachedSegment = localStorage.getItem(`segment_${segment.id}`);
+                let segmentDetails;
+                
+                if (cachedSegment) {
+                    segmentDetails = JSON.parse(cachedSegment);
+                } else {
+                    let segmentResponse;
+                    console.log("Fetching segment details from Strava");
+                    // Get segment details from Strava
+                    segmentResponse = await fetch(
+                        `${API_URL}/api/segment/${segment.id}?access_token=${tokens.access_token}&refresh_token=${tokens.refresh_token}&expires_at=${tokens.expires_at}`
+                    );
+                    if (!segmentResponse.ok) {
+                        throw new Error(`Failed to fetch segment ${segment.segment.id}`);
+                    }
+
+                    segmentDetails = await segmentResponse.json();
+
+                    // Cache segment details in localStorage
+                    localStorage.setItem(`segment_${segment.id}`, JSON.stringify(segmentDetails));
+                }
+
+                console.log("Segment details", segmentDetails);
+                setSegmentData(prevData => {
+                    return {
+                        ...prevData,
+                        [segment.id]: segmentDetails
+                    }
+                });
+
+                // Get terrain data for segment
+                // const terrainResponse = await fetch(
+                //     `${API_URL}/api/terrain`,
+                //     {
+                //         method: 'POST',
+                //         headers: {
+                //             'Content-Type': 'application/json',
+                //             'Authorization': `Bearer ${tokens.access_token}`
+                //         },
+                //         body: JSON.stringify({
+                //             polyline: segmentDetails.map.polyline
+                //         })
+                //     }
+                // );
+
+                // if (!terrainResponse.ok) {
+                //     throw new Error(`Failed to fetch terrain for segment ${segment.segment.id}`);
+                // }
+
+                // const terrainData = await terrainResponse.json();
+
+                // Process and store segment data
+                // await processSegmentData(segment, terrainData);
+            } catch (error) {
+                console.error(`Error processing segment ${segment.segment.id}:`, error);
+            }
+        }
+
+    }, [activity.id]);
+
     const renderSegmentDetails = () => {
         if (loading) {
             return (
@@ -138,18 +212,24 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
             );
         }
 
-        if (!segmentData) {
+        if (Object.keys(segmentData).length === 0) {
             return (
-                <Typography variant="body1" align="center" my={2}>
-                    Click on a segment to view its details
-                </Typography>
+                <Button
+                    variant="contained"
+                    color="primary"
+                    sx={{ my: 2 }}
+                    fullWidth
+                    onClick={() => handleLoadSegments()}
+                >
+                    Load segments for {activity.name}
+                </Button>
             );
         }
 
         return (
             <>
                 <Typography variant="h6" gutterBottom>
-                    Selected Segment Details
+                    Activity Segments
                 </Typography>
                 
                 <TableContainer component={Paper}>
@@ -166,21 +246,23 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
                             </TableRow>
                         </TableHead>
                         <TableBody>
-                            <TableRow>
-                                <TableCell>{segmentData.position}</TableCell>
+                            {Object.values(segmentData).map((segment, index) => (
+                            <TableRow key={index}>
+                                <TableCell>{segment.position}</TableCell>
                                 <TableCell component="th" scope="row">
-                                    {segmentData.name}
+                                    {segment.name}
                                 </TableCell>
-                                <TableCell align="right">{segmentData.length}</TableCell>
+                                <TableCell align="right">{segment.distance}m</TableCell>
                                 <TableCell align="right">
-                                    {segmentData.natural_percentage !== undefined ? 
-                                        `${segmentData.natural_percentage}%` : 
+                                    {segment.natural_percentage !== undefined ? 
+                                        `${segment.natural_percentage}%` : 
                                         'N/A'}
                                 </TableCell>
                                 <TableCell>{segmentData.surfaces}</TableCell>
                                 <TableCell>{segmentData.tracktypes}</TableCell>
                                 <TableCell>{segmentData.highways}</TableCell>
-                            </TableRow>
+                                </TableRow>
+                            ))}
                         </TableBody>
                     </Table>
                 </TableContainer>
