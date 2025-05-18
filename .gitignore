@@ -7,8 +7,7 @@ frontend/.env.production.local
 
 backend/venv/lib
 backend/venv/bin
-backend/__pycache__
+**/__pycache__/**
 
-**/__pycache__/
 *.py[cod]
 *$py.class

@@ -163,50 +163,80 @@ async def get_terrain_info(request: TerrainRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/osm/match/{segment_id}", response_model=List[WayMatchResult])
+@app.post("/api/segments/{segment_id}/match")
 async def match_segment_to_ways(
     segment_id: int,
-    authorization: str = Header(...),
+    polyline: str,
     max_distance: float = 10.0,
     min_confidence: float = 0.7
 ):
     """
-    Match a Strava segment to OSM ways.
+    Match a segment's polyline to OSM ways.
     
     Args:
-        segment_id: Strava segment ID
-        authorization: Bearer token for Strava API
+        segment_id: Strava segment ID (for reference only)
+        polyline: Encoded polyline from the segment
         max_distance: Maximum allowed distance between way and segment (meters)
         min_confidence: Minimum confidence score for a match (0-1)
         
     Returns:
-        List of matching ways with confidence scores
+        List of matching ways with confidence scores and terrain information
     """
     try:
-        # Get segment details from Strava
-        token = authorization.replace("Bearer ", "")
-        segment = await StravaService.get_segment(segment_id, token)
-        
-        if not segment or not segment.get('map', {}).get('polyline'):
-            raise HTTPException(
-                status_code=404,
-                detail="Segment not found or no polyline available"
-            )
+        # Initialize services
+        overpass_client = OverpassClient()
+        way_matching_service = WayMatchingService(overpass_client)
         
         # Find matching ways
-        matches = await WayMatchingService.find_matching_ways(
-            segment['map']['polyline'],
+        matches = await way_matching_service.find_matching_ways(
+            polyline,
             max_distance=max_distance,
             min_confidence=min_confidence
         )
         
+        # For each match, get terrain information
+        for match in matches:
+            # Get terrain info for this way
+            terrain_info = await get_terrain_info_for_way(match.way_id, polyline)
+            match.terrain_info = terrain_info
+        
         return matches
         
     except Exception as e:
+        logger.error(f"Error matching segment to ways: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Error matching segment to ways: {str(e)}"
-        ) 
+        )
+
+async def get_terrain_info_for_way(way_id: int, polyline: str) -> dict:
+    """Get terrain information for a specific way."""
+    try:
+        # Decode the polyline to get coordinates
+        points = decode(polyline)
+        if not points:
+            return {}
+            
+        # Create a bounding box around the points
+        min_lat = min(p[0] for p in points) - 0.001
+        max_lat = max(p[0] for p in points) + 0.001
+        min_lon = min(p[1] for p in points) - 0.001
+        max_lon = max(p[1] for p in points) + 0.001
+        
+        # Query terrain information
+        query = TerrainQuery(
+            start_lat=min_lat,
+            start_lon=min_lon,
+            end_lat=max_lat,
+            end_lon=max_lon,
+            polyline=polyline
+        )
+        
+        return await get_terrain_info(query)
+        
+    except Exception as e:
+        logger.error(f"Error getting terrain info for way {way_id}: {str(e)}")
+        return {}
 
 @app.get("/api/auth/callback")
 async def strava_callback(code: str):
@@ -239,6 +269,7 @@ async def strava_callback(code: str):
 
 @app.get("/api/activities")
 async def get_activities(access_token: str, refresh_token: str, expires_at: int):
+    """Get list of activities with basic information only."""
     try:
         # Get a valid access token
         valid_token = get_valid_token(access_token, refresh_token, expires_at)
@@ -247,41 +278,88 @@ async def get_activities(access_token: str, refresh_token: str, expires_at: int)
         response = requests.get(
             f"{STRAVA_API_URL}/athlete/activities",
             headers=headers,
-            params={"per_page": 30}  # Limit to 30 activities for performance
+            params={
+                "per_page": 30,  # Limit to 30 activities for performance
+                "fields": "id,name,type,distance,moving_time,elapsed_time,start_date,map"  # Only fetch needed fields
+            }
         )
         response.raise_for_status()
         activities = response.json()
         
-        # Fetch detailed activity data including map for each activity
-        for activity in activities:
-            logger.info(f"Fetching details for activity {activity['id']}")
-            # Request detailed activity data including segment efforts
-            detail_response = requests.get(
-                f"{STRAVA_API_URL}/activities/{activity['id']}",
-                headers=headers,
-                params={"include_all_efforts": "true"}  # Include all segment efforts
-            )
-            if detail_response.status_code == 200:
-                detail_data = detail_response.json()
-                activity["map"] = detail_data.get("map", {})
-                
-                # Log segment data if available
-                if "segment_efforts" in detail_data:
-                    logger.info(f"Activity {activity['id']} has {len(detail_data['segment_efforts'])} segments")
-                    for segment in detail_data["segment_efforts"]:
-                        logger.info(f"  Segment: {segment.get('name')} - {segment.get('segment', {}).get('id')}")
-                else:
-                    logger.info(f"Activity {activity['id']} has no segments")
-                
-                # Include segment data in the response
-                activity["segments"] = detail_data.get("segment_efforts", [])
-            else:
-                logger.error(f"Failed to fetch details for activity {activity['id']}: {detail_response.status_code}")
-                logger.error(f"Response: {detail_response.text}")
+        # Transform to include only necessary data
+        simplified_activities = [{
+            "id": activity["id"],
+            "name": activity["name"],
+            "type": activity["type"],
+            "distance": activity["distance"],
+            "moving_time": activity["moving_time"],
+            "elapsed_time": activity["elapsed_time"],
+            "start_date": activity["start_date"],
+            "has_map": bool(activity.get("map", {}).get("polyline"))
+        } for activity in activities]
         
-        return activities
+        return simplified_activities
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching activities: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/activities/{activity_id}")
+async def get_activity_details(
+    activity_id: int,
+    access_token: str,
+    refresh_token: str,
+    expires_at: int
+):
+    """Get detailed information for a specific activity including segments."""
+    try:
+        # Get a valid access token
+        valid_token = get_valid_token(access_token, refresh_token, expires_at)
+        
+        headers = {"Authorization": f"Bearer {valid_token}"}
+        response = requests.get(
+            f"{STRAVA_API_URL}/activities/{activity_id}",
+            headers=headers,
+            params={"include_all_efforts": "true"}  # Include all segment efforts
+        )
+        response.raise_for_status()
+        activity = response.json()
+
+        logger.info(f"Fetched activity details for activity {activity_id}")
+        logger.info(f"Activity: {json.dumps(activity, indent=2)}")
+        
+        # Extract relevant data including segments
+        activity_details = {
+            "id": activity["id"],
+            "name": activity["name"],
+            "type": activity["type"],
+            "distance": activity["distance"],
+            "moving_time": activity["moving_time"],
+            "elapsed_time": activity["elapsed_time"],
+            "start_date": activity["start_date"],
+            "map": activity.get("map", {}),
+            "segments": [
+                {
+                    "id": effort["segment"]["id"],
+                    "name": effort["segment"]["name"],
+                    # "polyline": effort["segment"].get("map", {}).get("polyline"),
+                    "distance": effort["segment"]["distance"],
+                    "elevation_gain": effort["segment"].get("elevation_gain", 0),
+                    "average_grade": effort["segment"].get("average_grade", 0),
+                    "effort": {
+                        "id": effort["id"],
+                        "elapsed_time": effort["elapsed_time"],
+                        "moving_time": effort["moving_time"],
+                        "start_date": effort["start_date"]
+                    }
+                }
+                for effort in activity.get("segment_efforts", [])
+                # if effort["segment"].get("map", {}).get("polyline")  # Only include segments with polylines
+            ]
+        }
+        
+        return activity_details
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching activity details: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/activities/download")

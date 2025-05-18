@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   Container,
@@ -86,18 +86,58 @@ function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Get segment ID from URL if present
+  // Get activity and segment IDs from URL if present
   const urlParams = new URLSearchParams(location.search);
+  const activityId = urlParams.get('activity');
   const segmentId = urlParams.get('segment');
+  const authError = urlParams.get('error');
 
-  const clearActivityCache = () => {
+  const handleActivityClick = useCallback(async (activity, updateUrl = false) => {
+    try {
+      // setLoading(true);
+      const access_token = localStorage.getItem('strava_token');
+      const refresh_token = localStorage.getItem('strava_refresh_token');
+      const expires_at = localStorage.getItem('strava_token_expires_at');
+
+      const response = await axios.get(`${API_URL}/api/activities/${activity.id}`, {
+        params: {
+          access_token,
+          refresh_token,
+          expires_at
+        }
+      });
+      
+      setSelectedActivity(response.data);
+      
+      // Only update URL if explicitly requested, using React Router's navigate
+      if (updateUrl) {
+        navigate(`/?activity=${activity.id}`, { replace: true });
+      }
+    } catch (err) {
+      setError('Failed to fetch activity details');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  // Load activity details when URL changes
+  useEffect(() => {
+    if (activityId && activities.length > 0) {
+      const activity = activities.find(a => a.id.toString() === activityId);
+      if (activity) {
+        handleActivityClick(activity, false); // false means don't update URL
+      }
+    }
+  }, [activityId, activities, handleActivityClick]);
+
+  const clearActivityCache = useCallback(() => {
     localStorage.removeItem('strava_activities');
     localStorage.removeItem('strava_activities_last_fetch');
-  };
+  }, []);
 
   useEffect(() => {
     // Check for authentication error in URL
-    const authError = urlParams.get('error');
     if (authError) {
       setError('Authentication failed. Please try again.');
     }
@@ -110,7 +150,7 @@ function MainApp() {
     }
   }, [location]);
 
-  const loadActivities = async () => {
+  const loadActivities = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -153,22 +193,22 @@ function MainApp() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleStravaAuth = () => {
+  const handleStravaAuth = useCallback(() => {
     const clientId = process.env.REACT_APP_STRAVA_CLIENT_ID;
     const redirectUri = `${API_URL}/api/auth/callback`;
     const scope = 'read,activity:read';
     const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&approval_prompt=force&scope=${scope}`;
     window.location.href = authUrl;
-  };
+  }, []);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     clearActivityCache();
     loadActivities();
-  };
+  }, [clearActivityCache, loadActivities]);
 
-  const handleDownload = async () => {
+  const handleDownload = useCallback(async () => {
     try {
       const access_token = localStorage.getItem('strava_token');
       const refresh_token = localStorage.getItem('strava_refresh_token');
@@ -195,18 +235,12 @@ function MainApp() {
       setError('Failed to download activities');
       console.error(err);
     }
-  };
+  }, []);
 
-  const handleActivityClick = (activity) => {
-    setSelectedActivity(activity);
-    // Clear segment from URL when selecting a new activity
-    navigate(`/?activity=${activity.id}`);
-  };
 
-  const handleSegmentClick = (segmentId) => {
-    // Update URL with segment ID
-    navigate(`/?activity=${selectedActivity.id}&segment=${segmentId}`);
-  };
+  const handleSegmentClick = useCallback((segmentId) => {
+    navigate(`/?activity=${selectedActivity.id}&segment=${segmentId}`, { replace: true });
+  }, [navigate, selectedActivity]);
 
   return (
     <Container maxWidth="lg">
@@ -265,6 +299,14 @@ function MainApp() {
                           button
                           selected={selectedActivity?.id === activity.id}
                           onClick={() => handleActivityClick(activity)}
+                          sx={{ 
+                            '&.Mui-selected': {
+                              backgroundColor: 'rgba(25, 118, 210, 0.08)',
+                              '&:hover': {
+                                backgroundColor: 'rgba(25, 118, 210, 0.12)',
+                              },
+                            },
+                          }}
                         >
                           <ListItemText
                             primary={activity.name}
