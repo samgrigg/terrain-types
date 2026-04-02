@@ -14,6 +14,7 @@ import {
   Grid,
 } from '@mui/material';
 import axios from 'axios';
+import { decode } from '@mapbox/polyline';
 import ActivityMap from './components/ActivityMap';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -107,6 +108,13 @@ function MainApp() {
         }
       });
       
+      console.log("Response", response.data);
+      const polyline = response.data.map?.polyline;
+      console.log("Polyline", polyline);
+      if (polyline) {
+        const decodedPolyline = decode(polyline);
+        console.log("Decoded Polyline", decodedPolyline);
+      }
       setSelectedActivity(response.data);
       
       // Only update URL if explicitly requested, using React Router's navigate
@@ -135,20 +143,6 @@ function MainApp() {
     localStorage.removeItem('strava_activities');
     localStorage.removeItem('strava_activities_last_fetch');
   }, []);
-
-  useEffect(() => {
-    // Check for authentication error in URL
-    if (authError) {
-      setError('Authentication failed. Please try again.');
-    }
-
-    // Check if we have a token in localStorage
-    const token = localStorage.getItem('strava_token');
-    if (token) {
-      setIsAuthenticated(true);
-      loadActivities();
-    }
-  }, [location]);
 
   const loadActivities = useCallback(async () => {
     try {
@@ -194,6 +188,20 @@ function MainApp() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    // Check for authentication error in URL
+    if (authError) {
+      setError('Authentication failed. Please try again.');
+    }
+
+    // Check if we have a token in localStorage
+    const token = localStorage.getItem('strava_token');
+    if (token) {
+      setIsAuthenticated(true);
+      loadActivities();
+    }
+  }, [authError, loadActivities]);
 
   const handleStravaAuth = useCallback(() => {
     const clientId = process.env.REACT_APP_STRAVA_CLIENT_ID;

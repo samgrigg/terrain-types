@@ -1,4 +1,4 @@
-import L from 'leaflet';
+import * as L from 'leaflet';
 import { decode } from '@mapbox/polyline';
 import { generateSegmentColor } from './terrainUtils';
 
@@ -12,7 +12,7 @@ export const initializeMap = (mapRef) => {
 
 export const clearMapLayers = (map) => {
     map.eachLayer((layer) => {
-        if (layer instanceof L.Polyline) {
+        if (layer instanceof L.Polyline || typeof layer.getLatLngs === 'function') {
             map.removeLayer(layer);
         }
     });
@@ -48,6 +48,9 @@ export const createSegmentPopup = (segment, index, totalSegments, terrainInfo) =
 };
 
 export const fitMapToSegment = (map, points) => {
+    if (!points || points.length < 2) {
+        return;
+    }
     const polyline = L.polyline(points);
     map.fitBounds(polyline.getBounds());
 };
@@ -56,7 +59,11 @@ export const processActivityData = (activity) => {
     if (!activity?.map?.polyline) {
         return null;
     }
-    return decode(activity.map.polyline);
+    try {
+        return decode(activity.map.polyline);
+    } catch (error) {
+        return null;
+    }
 };
 
 export const sortSegmentsByPosition = (segments) => {

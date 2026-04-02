@@ -1,181 +1,102 @@
+from unittest.mock import AsyncMock
+
+import polyline
 import pytest
-from unittest.mock import patch, MagicMock
-from main import get_terrain_info, TerrainQuery
-import math
-import asyncio
 
-# Test data
-MOCK_SEGMENT = {
-    'start_lat': 40.521494,
-    'start_lon': -111.828997,
-    'end_lat': 40.525852,
-    'end_lon': -111.826333,
-    'polyline': 'test_polyline'
-}
+from app.models.terrain import TerrainQuery
+from app.services.terrain_service import TerrainService
 
-MOCK_OVERPASS_RESPONSE = {
-    'elements': [
-        {
-            'type': 'way',
-            'id': 1,
-            'nodes': [1, 2, 3],
-            'tags': {
-                'surface': 'gravel',
-                'tracktype': 'grade1',
-                'highway': 'path'
-            }
-        },
-        {
-            'type': 'way',
-            'id': 2,
-            'nodes': [4, 5, 6],
-            'tags': {
-                'surface': 'asphalt',
-                'highway': 'residential'
-            }
-        }
+
+ROUTE_POINTS = [
+    (40.0000, -105.0000),
+    (40.0000, -104.9995),
+    (40.0000, -104.9990),
+]
+
+
+def build_way(way_id, tags, points):
+    return {
+        "id": way_id,
+        "tags": tags,
+        "nodes": [
+            {"id": index + 1, "lat": point[0], "lon": point[1]}
+            for index, point in enumerate(points)
+        ],
+    }
+
+
+@pytest.mark.anyio
+async def test_terrain_service_prefers_geometry_match_over_nearby_parallel_road():
+    overpass_client = AsyncMock()
+    overpass_client.query_ways.return_value = [
+        build_way(
+            1,
+            {"highway": "track", "surface": "gravel", "tracktype": "grade2"},
+            ROUTE_POINTS,
+        ),
+        build_way(
+            2,
+            {"highway": "residential", "surface": "asphalt"},
+            [(lat + 0.0004, lon) for lat, lon in ROUTE_POINTS],
+        ),
     ]
-}
-
-@pytest.fixture
-def terrain_query():
-    return TerrainQuery(
-        start_lat=MOCK_SEGMENT['start_lat'],
-        start_lon=MOCK_SEGMENT['start_lon'],
-        end_lat=MOCK_SEGMENT['end_lat'],
-        end_lon=MOCK_SEGMENT['end_lon'],
-        distance_threshold=0.0001
+    service = TerrainService(overpass_client)
+    query = TerrainQuery(
+        start_lat=ROUTE_POINTS[0][0],
+        start_lon=ROUTE_POINTS[0][1],
+        end_lat=ROUTE_POINTS[-1][0],
+        end_lon=ROUTE_POINTS[-1][1],
+        polyline=polyline.encode(ROUTE_POINTS),
+        distance_threshold=25.0,
     )
 
-@pytest.mark.asyncio
-async def test_get_terrain_info_basic(terrain_query):
-    """Test basic terrain info retrieval with mock data."""
-    with patch('main.query_overpass') as mock_query:
-        mock_query.return_value = MOCK_OVERPASS_RESPONSE
-        
-        result = await get_terrain_info(terrain_query)
-        
-        assert isinstance(result, dict)
-        assert 'surfaces' in result
-        assert 'tracktypes' in result
-        assert 'highways' in result
-        assert 'surface_distances' in result
-        assert 'natural_percentage' in result
+    result = await service.get_terrain_info(query)
 
-@pytest.mark.asyncio
-async def test_get_terrain_info_empty_response(terrain_query):
-    """Test handling of empty Overpass response."""
-    with patch('main.query_overpass') as mock_query:
-        mock_query.return_value = {'elements': []}
-        
-        result = await get_terrain_info(terrain_query)
-        
-        assert result['surfaces'] == []
-        assert result['tracktypes'] == []
-        assert result['highways'] == []
-        assert result['natural_percentage'] == 0
+    assert result.surfaces[0] == "gravel"
+    assert "asphalt" not in result.surfaces
+    assert result.natural_percentage == 100.0
+    assert result.surface_distances["gravel"] == result.total_distance
 
-@pytest.mark.asyncio
-async def test_get_terrain_info_error_handling(terrain_query):
-    """Test error handling in terrain info retrieval."""
-    with patch('main.query_overpass') as mock_query:
-        mock_query.side_effect = Exception('API Error')
-        
-        result = await get_terrain_info(terrain_query)
-        
-        assert result['surfaces'] == []
-        assert result['tracktypes'] == []
-        assert result['highways'] == []
-        assert result['natural_percentage'] == 0
 
-def test_distance_calculation():
-    """Test distance calculation between two points."""
-    # Test points (roughly 1km apart)
-    lat1, lon1 = 40.521494, -111.828997
-    lat2, lon2 = 40.525852, -111.826333
-    
-    # Calculate distance using Haversine formula
-    R = 6371000  # Earth's radius in meters
-    lat1, lon1 = math.radians(lat1), math.radians(lon1)
-    lat2, lon2 = math.radians(lat2), math.radians(lon2)
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    distance = R * c
-    
-    # Distance should be roughly 1km
-    assert 900 < distance < 1100, f"Expected distance around 1km, got {distance}m"
+@pytest.mark.anyio
+async def test_terrain_service_supports_legacy_degree_threshold_values():
+    overpass_client = AsyncMock()
+    overpass_client.query_ways.return_value = [
+        build_way(1, {"highway": "track", "surface": "dirt"}, ROUTE_POINTS)
+    ]
+    service = TerrainService(overpass_client)
+    query = TerrainQuery(
+        start_lat=ROUTE_POINTS[0][0],
+        start_lon=ROUTE_POINTS[0][1],
+        end_lat=ROUTE_POINTS[-1][0],
+        end_lon=ROUTE_POINTS[-1][1],
+        polyline=polyline.encode(ROUTE_POINTS),
+        distance_threshold=0.0001,
+    )
 
-@pytest.mark.asyncio
-async def test_way_overlap_detection(terrain_query):
-    """Test detection of overlap between a way and a segment."""
-    with patch('main.query_overpass') as mock_query:
-        mock_query.return_value = MOCK_OVERPASS_RESPONSE
-        
-        result = await get_terrain_info(terrain_query)
-        
-        # Check if ways were properly processed
-        assert len(result['surfaces']) > 0
-        assert len(result['highways']) > 0
+    result = await service.get_terrain_info(query)
 
-@pytest.mark.asyncio
-async def test_surface_type_classification(terrain_query):
-    """Test classification of surface types."""
-    with patch('main.query_overpass') as mock_query:
-        mock_query.return_value = MOCK_OVERPASS_RESPONSE
-        
-        result = await get_terrain_info(terrain_query)
-        
-        # Check if surfaces were properly classified
-        assert 'gravel' in result['surfaces']
-        assert 'asphalt' in result['surfaces']
-        assert result['natural_percentage'] > 0
+    assert result.natural_percentage == 100.0
+    assert result.matched_distance == result.total_distance
 
-@pytest.mark.asyncio
-async def test_distance_threshold(terrain_query):
-    """Test distance threshold filtering."""
-    # Test with a very small threshold
-    terrain_query.distance_threshold = 0.00001
-    
-    with patch('main.query_overpass') as mock_query:
-        mock_query.return_value = MOCK_OVERPASS_RESPONSE
-        
-        result = await get_terrain_info(terrain_query)
-        
-        # With a very small threshold, we should get fewer matches
-        assert len(result['surfaces']) <= len(MOCK_OVERPASS_RESPONSE['elements'])
 
-@pytest.mark.asyncio
-async def test_polyline_processing(terrain_query):
-    """Test processing of polyline data."""
-    terrain_query.polyline = 'test_polyline'
-    
-    with patch('main.query_overpass') as mock_query:
-        mock_query.return_value = MOCK_OVERPASS_RESPONSE
-        
-        result = await get_terrain_info(terrain_query)
-        
-        # Check if the result contains the expected data
-        assert isinstance(result, dict)
-        assert 'surface_distances' in result
+@pytest.mark.anyio
+async def test_terrain_service_marks_unmatched_distance_as_unknown():
+    overpass_client = AsyncMock()
+    overpass_client.query_ways.return_value = []
+    service = TerrainService(overpass_client)
+    query = TerrainQuery(
+        start_lat=ROUTE_POINTS[0][0],
+        start_lon=ROUTE_POINTS[0][1],
+        end_lat=ROUTE_POINTS[-1][0],
+        end_lon=ROUTE_POINTS[-1][1],
+        polyline=polyline.encode(ROUTE_POINTS),
+        distance_threshold=25.0,
+    )
 
-@pytest.mark.asyncio
-async def test_error_handling_invalid_coordinates(terrain_query):
-    """Test handling of invalid coordinates."""
-    terrain_query.start_lat = 1000  # Invalid latitude
-    
-    with patch('main.query_overpass') as mock_query:
-        mock_query.return_value = MOCK_OVERPASS_RESPONSE
-        
-        result = await get_terrain_info(terrain_query)
-        
-        # Should handle invalid coordinates gracefully
-        assert isinstance(result, dict)
-        assert result['surfaces'] == []
-        assert result['tracktypes'] == []
-        assert result['highways'] == []
-        assert result['natural_percentage'] == 0
+    result = await service.get_terrain_info(query)
 
-if __name__ == '__main__':
-    pytest.main([__file__]) 
+    assert result.surfaces == ["unknown"]
+    assert result.matched_distance == 0.0
+    assert result.unmatched_distance == result.total_distance
+    assert result.natural_percentage == 0.0

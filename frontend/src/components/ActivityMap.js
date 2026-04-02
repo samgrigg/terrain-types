@@ -1,422 +1,348 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import { decode } from '@mapbox/polyline';
-import axios from 'axios';
+import React, { useEffect, useRef, useState } from 'react';
+import { encode } from '@mapbox/polyline';
 import {
-    Button,
-    Table,
-    TableBody,
-    TableCell,
-    TableContainer,
-    TableHead,
-    TableRow,
-    Paper,
-    Typography,
-    Box,
-    CircularProgress,
-    Divider
+  Box,
+  CircularProgress,
+  Divider,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
 } from '@mui/material';
-import { getTerrainData, formatTerrainInfo, fetchTerrainData } from '../utils/terrainUtils';
+
+import WayMatchDetails from './WayMatchDetails';
+import { formatTerrainInfo, getTerrainData } from '../utils/terrainUtils';
 import {
-    initializeMap,
-    clearMapLayers,
-    createMainRoutePolyline,
-    createSegmentPolyline,
-    createSegmentPopup,
-    fitMapToSegment,
-    processActivityData,
-    sortSegmentsByPosition
+  clearMapLayers,
+  createMainRoutePolyline,
+  createSegmentPolyline,
+  createSegmentPopup,
+  fitMapToSegment,
+  initializeMap,
+  processActivityData,
+  sortSegmentsByPosition,
 } from '../utils/mapUtils';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
-// Function to generate a random color
-const getRandomColor = () => {
-    const letters = '0123456789ABCDEF';
-    let color = '#';
-    for (let i = 0; i < 6; i++) {
-        color += letters[Math.floor(Math.random() * 16)];
-    }
-    return color;
-};
+const formatDistance = (distanceMeters) => `${(distanceMeters / 1000).toFixed(1)} km`;
 
-// Function to generate a color based on segment ID
-const getSegmentColor = (segmentId) => {
-    // Use a hash function to generate a consistent color for each segment
-    let hash = 0;
-    for (let i = 0; i < segmentId.toString().length; i++) {
-        hash = segmentId.toString().charCodeAt(i) + ((hash << 5) - hash);
-    }
-    
-    // Convert hash to hex color
-    let color = '#';
-    for (let i = 0; i < 3; i++) {
-        const value = (hash >> (i * 8)) & 0xFF;
-        color += ('00' + value.toString(16)).substr(-2);
-    }
-    return color;
-};
-
-// Function to calculate natural surface percentage
-const calculateNaturalSurfacePercentage = (surfaces) => {
-    if (!surfaces || surfaces.length === 0) return 0;
-    
-    const naturalSurfaces = ['gravel', 'wood', 'unpaved', 'dirt', 'ground', 'grass', 'sand', 'earth'];
-    const naturalCount = surfaces.filter(surface => 
-        naturalSurfaces.some(natural => surface.toLowerCase().includes(natural))
-    ).length;
-    
-    return Math.round((naturalCount / surfaces.length) * 100);
-};
+const summarizeSurfaceDistances = (surfaceDistances = {}) => (
+  Object.entries(surfaceDistances)
+    .slice(0, 3)
+    .map(([surface, distance]) => `${surface}: ${formatDistance(distance)}`)
+    .join(', ')
+);
 
 const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
-    const mapRef = useRef(null);
-    const mapInstanceRef = useRef(null);
-    const [segmentData, setSegmentData] = useState({});
-    const [loading, setLoading] = useState(false);
-    const [wayMatches, setWayMatches] = useState(null);
-    const [wayMatchesLoading, setWayMatchesLoading] = useState(false);
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const [activityTerrain, setActivityTerrain] = useState(null);
+  const [activityTerrainLoading, setActivityTerrainLoading] = useState(false);
+  const [selectedSegmentTerrain, setSelectedSegmentTerrain] = useState(null);
+  const [selectedSegmentTerrainLoading, setSelectedSegmentTerrainLoading] = useState(false);
+  const [wayMatches, setWayMatches] = useState([]);
+  const [wayMatchesLoading, setWayMatchesLoading] = useState(false);
 
-    const handleSegmentSelection = async (segment, index, totalSegments) => {
-        setLoading(true);
-        try {
-            const tokens = {
-                access_token: localStorage.getItem('strava_token'),
-                refresh_token: localStorage.getItem('strava_refresh_token'),
-                expires_at: localStorage.getItem('strava_token_expires_at')
-            };
+  const decodedPoints = processActivityData(activity);
+  const sortedSegments = sortSegmentsByPosition(activity?.segments || []);
+  const selectedSegment = sortedSegments.find(
+    (segment) => segment.segment.id.toString() === selectedSegmentId,
+  );
 
-            const terrainData = await getTerrainData(segment, tokens);
-            const terrainInfo = formatTerrainInfo(terrainData);
+  useEffect(() => {
+    let cancelled = false;
 
-            setSegmentData(prevData => ({
-                ...prevData,
-                [segment.id]: {
-                    name: segment.name,
-                    length: (segment.segment.distance / 1000).toFixed(2),
-                    position: index + 1,
-                    surfaces: terrainData?.surfaces?.join(', ') || 'N/A',
-                    tracktypes: terrainData?.tracktypes?.join(', ') || 'N/A', 
-                    highways: terrainData?.highways?.join(', ') || 'N/A',
-                    natural_percentage: terrainData?.natural_percentage
-                }
-            }));
+    const loadActivityTerrain = async () => {
+      if (!activity?.map?.polyline) {
+        setActivityTerrain(null);
+        return;
+      }
 
-            // Fetch way matches
-            setWayMatchesLoading(true);
-            try {
-                const response = await fetch(
-                    `${API_URL}/osm/match/${segment.segment.id}`,
-                    {
-                        headers: {
-                            'Authorization': `Bearer ${tokens.access_token}`
-                        }
-                    }
-                );
-                if (!response.ok) throw new Error('Failed to fetch way matches');
-                const matches = await response.json();
-                setWayMatches(matches);
-            } catch (error) {
-                console.error('Error fetching way matches:', error);
-                setWayMatches([]);
-            } finally {
-                setWayMatchesLoading(false);
-            }
-
-            return terrainInfo;
-        } catch (error) {
-            console.error('Error processing terrain data:', error);
-            return 'Error loading terrain data';
-        } finally {
-            setLoading(false);
+      setActivityTerrainLoading(true);
+      try {
+        const terrain = await getTerrainData(
+          { id: activity.id, polyline: activity.map.polyline, distance_threshold: 25 },
+          `activity_${activity.id}`,
+        );
+        if (!cancelled) {
+          setActivityTerrain(terrain);
         }
+      } catch (error) {
+        if (!cancelled) {
+          setActivityTerrain(null);
+        }
+        console.error('Failed to load activity terrain:', error);
+      } finally {
+        if (!cancelled) {
+          setActivityTerrainLoading(false);
+        }
+      }
     };
 
-    const handleLoadSegments = useCallback(async () => {
-        // Get tokens for API call
-        const tokens = {
-            access_token: localStorage.getItem('strava_token'),
-            refresh_token: localStorage.getItem('strava_refresh_token'), 
-            expires_at: localStorage.getItem('strava_token_expires_at')
-        };
+    loadActivityTerrain();
 
-        // Process each segment
-        for (const segment of activity.segments) {
-            console.log("Segment", segment);
-            try {
-                // Check if segment details are in localStorage
-                const cachedSegment = localStorage.getItem(`segment_${segment.id}`);
-                let segmentDetails;
-                
-                if (cachedSegment) {
-                    segmentDetails = JSON.parse(cachedSegment);
-                } else {
-                    let segmentResponse;
-                    console.log("Fetching segment details from Strava");
-                    // Get segment details from Strava
-                    segmentResponse = await fetch(
-                        `${API_URL}/api/segment/${segment.id}?access_token=${tokens.access_token}&refresh_token=${tokens.refresh_token}&expires_at=${tokens.expires_at}`
-                    );
-                    if (!segmentResponse.ok) {
-                        throw new Error(`Failed to fetch segment ${segment.segment.id}`);
-                    }
+    return () => {
+      cancelled = true;
+    };
+  }, [activity]);
 
-                    segmentDetails = await segmentResponse.json();
+  useEffect(() => {
+    let cancelled = false;
 
-                    // Cache segment details in localStorage
-                    localStorage.setItem(`segment_${segment.id}`, JSON.stringify(segmentDetails));
-                }
+    const loadSelectedSegmentTerrain = async () => {
+      if (!selectedSegment || !decodedPoints) {
+        setSelectedSegmentTerrain(null);
+        setSelectedSegmentTerrainLoading(false);
+        setWayMatches([]);
+        setWayMatchesLoading(false);
+        return;
+      }
 
-                console.log("Segment details", segmentDetails);
-                setSegmentData(prevData => {
-                    return {
-                        ...prevData,
-                        [segment.id]: segmentDetails
-                    }
-                });
+      const segmentPoints = decodedPoints.slice(
+        selectedSegment.start_index,
+        selectedSegment.end_index + 1,
+      );
+      if (segmentPoints.length < 2) {
+        setSelectedSegmentTerrain(null);
+        setSelectedSegmentTerrainLoading(false);
+        setWayMatches([]);
+        setWayMatchesLoading(false);
+        return;
+      }
 
-                // Get terrain data for segment
-                const terrainResponse = await getTerrainData(segmentDetails, tokens);
-
-                console.log("Terrain response", terrainResponse);
-
-                // if (!terrainResponse.ok) {
-                //     throw new Error(`Failed to fetch terrain for segment ${segment.segment.id}`);
-                // }
-
-                // const terrainData = await terrainResponse.json();
-
-                // Process and store segment data
-                // await processSegmentData(segment, terrainData);
-            } catch (error) {
-                console.error(`Error processing segment ${segment.id}:`, error);
-            }
+      const polyline = encode(segmentPoints);
+      setSelectedSegmentTerrainLoading(true);
+      try {
+        const terrain = await getTerrainData(
+          {
+            id: selectedSegment.segment.id,
+            polyline,
+            distance_threshold: 25,
+          },
+          `segment_${selectedSegment.segment.id}`,
+        );
+        if (!cancelled) {
+          setSelectedSegmentTerrain(terrain);
         }
-
-    }, [activity.id]);
-
-    const renderSegmentDetails = () => {
-        if (loading) {
-            return (
-                <Box display="flex" justifyContent="center" my={2}>
-                    <CircularProgress />
-                </Box>
-            );
+      } catch (error) {
+        if (!cancelled) {
+          setSelectedSegmentTerrain(null);
         }
+        console.error('Failed to load selected segment terrain:', error);
+      } finally {
+        if (!cancelled) {
+          setSelectedSegmentTerrainLoading(false);
+        }
+      }
 
-        if (Object.keys(segmentData).length === 0) {
-            return (
-                <Button
-                    variant="contained"
-                    color="primary"
-                    sx={{ my: 2 }}
-                    fullWidth
-                    onClick={() => handleLoadSegments()}
+      const accessToken = localStorage.getItem('strava_token');
+      if (!accessToken) {
+        setWayMatches([]);
+        setWayMatchesLoading(false);
+        return;
+      }
+
+      setWayMatchesLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/osm/match/${selectedSegment.segment.id}`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        if (!response.ok) {
+          throw new Error('Failed to fetch OSM way matches');
+        }
+        const matches = await response.json();
+        if (!cancelled) {
+          setWayMatches(matches);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setWayMatches([]);
+        }
+        console.error('Failed to load way matches:', error);
+      } finally {
+        if (!cancelled) {
+          setWayMatchesLoading(false);
+        }
+      }
+    };
+
+    loadSelectedSegmentTerrain();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [decodedPoints, selectedSegment]);
+
+  useEffect(() => {
+    if (!decodedPoints) {
+      return undefined;
+    }
+
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = initializeMap(mapRef.current);
+    }
+
+    clearMapLayers(mapInstanceRef.current);
+    const mainRoute = createMainRoutePolyline(mapInstanceRef.current, decodedPoints);
+    const selectedTerrainLabel = formatTerrainInfo(selectedSegmentTerrain);
+
+    sortedSegments.forEach((segment, index) => {
+      const segmentPoints = decodedPoints.slice(segment.start_index, segment.end_index + 1);
+      if (segmentPoints.length < 2) {
+        return;
+      }
+
+      const isSelected = selectedSegmentId === segment.segment.id.toString();
+      const polyline = createSegmentPolyline(
+        mapInstanceRef.current,
+        segmentPoints,
+        segment,
+        isSelected,
+      );
+
+      polyline.on('click', () => onSegmentClick(segment.segment.id));
+
+      if (isSelected) {
+        polyline.bindPopup(
+          createSegmentPopup(segment, index, sortedSegments.length, selectedTerrainLabel),
+        );
+      }
+    });
+
+    if (selectedSegment) {
+      const selectedPoints = decodedPoints.slice(
+        selectedSegment.start_index,
+        selectedSegment.end_index + 1,
+      );
+      fitMapToSegment(mapInstanceRef.current, selectedPoints);
+    } else {
+      mapInstanceRef.current.fitBounds(mainRoute.getBounds());
+    }
+
+    return undefined;
+  }, [decodedPoints, onSegmentClick, selectedSegment, selectedSegmentId, selectedSegmentTerrain, sortedSegments]);
+
+  return (
+    <Box>
+      <div
+        ref={mapRef}
+        style={{
+          height: '400px',
+          width: '100%',
+          marginTop: '20px',
+          marginBottom: '20px',
+          border: '1px solid #ccc',
+          borderRadius: '4px',
+        }}
+      />
+
+      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+        <Typography variant="h6" gutterBottom>
+          Ride Terrain Estimate
+        </Typography>
+        {activityTerrainLoading ? (
+          <Box display="flex" justifyContent="center" py={2}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : activityTerrain ? (
+          <>
+            <Typography variant="body1">
+              Unpaved estimate: {activityTerrain.natural_percentage}% of route
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Matched {formatDistance(activityTerrain.matched_distance)} of {formatDistance(activityTerrain.total_distance)}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Top surfaces: {summarizeSurfaceDistances(activityTerrain.surface_distances) || 'No surface tags found'}
+            </Typography>
+          </>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            Terrain data is unavailable for this activity.
+          </Typography>
+        )}
+      </Paper>
+
+      <Typography variant="h6" gutterBottom>
+        Activity Segments ({sortedSegments.length})
+      </Typography>
+      <TableContainer component={Paper}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>#</TableCell>
+              <TableCell>Name</TableCell>
+              <TableCell align="right">Distance</TableCell>
+              <TableCell align="right">Grade</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {sortedSegments.map((segment, index) => {
+              const isSelected = selectedSegmentId === segment.segment.id.toString();
+              return (
+                <TableRow
+                  key={segment.segment.id}
+                  hover
+                  selected={isSelected}
+                  onClick={() => onSegmentClick(segment.segment.id)}
+                  sx={{ cursor: 'pointer' }}
                 >
-                    Load segments for {activity.name}
-                </Button>
-            );
-        }
+                  <TableCell>{index + 1}</TableCell>
+                  <TableCell>{segment.segment.name}</TableCell>
+                  <TableCell align="right">{formatDistance(segment.segment.distance)}</TableCell>
+                  <TableCell align="right">{segment.segment.average_grade?.toFixed(1) ?? '0.0'}%</TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
-        return (
-            <>
-                <Typography variant="h6" gutterBottom>
-                    Activity Segments ({Object.keys(segmentData).length})
+      {selectedSegment && (
+        <>
+          <Divider sx={{ my: 2 }} />
+          <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Selected Segment Terrain
+            </Typography>
+            {selectedSegmentTerrainLoading ? (
+              <Box display="flex" justifyContent="center" py={2}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : selectedSegmentTerrain ? (
+              <>
+                <Typography variant="body1">
+                  Unpaved estimate: {selectedSegmentTerrain.natural_percentage}%
                 </Typography>
-                
-                <TableContainer component={Paper}>
-                    <Table size="small">
-                        <TableHead>
-                            <TableRow>
-                                <TableCell>#</TableCell>
-                                <TableCell>Name</TableCell>
-                                <TableCell align="right">Distance (m)</TableCell>
-                                <TableCell>Has Map?</TableCell>
-                                <TableCell align="right">Natural Surface %</TableCell>
-                                <TableCell>Surface Type</TableCell>
-                                <TableCell>Track Type</TableCell>
-                                <TableCell>Road Type</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {Object.values(segmentData).map((segment, index) => (
-                            <TableRow key={index}>
-                                <TableCell>{index + 1}</TableCell>
-                                <TableCell component="th" scope="row">
-                                    {segment.name}
-                                </TableCell>
-                                <TableCell align="right">{segment.distance}m</TableCell>
-                                <TableCell>{segment.map ? 'Yes' : 'No'}</TableCell>
-                                <TableCell align="right">
-                                    {segment.natural_percentage !== undefined ? 
-                                        `${segment.natural_percentage}%` : 
-                                        'N/A'}
-                                </TableCell>
-                                <TableCell>{segmentData.surfaces}</TableCell>
-                                <TableCell>{segmentData.tracktypes}</TableCell>
-                                <TableCell>{segmentData.highways}</TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </>
-        );
-    };
-
-    const renderWayMatches = () => {
-        if (!selectedSegmentId) return null;
-
-        if (wayMatchesLoading) {
-            return (
-                <Box display="flex" justifyContent="center" my={2}>
-                    <CircularProgress />
-                </Box>
-            );
-        }
-
-        if (!wayMatches || wayMatches.length === 0) {
-            return (
-                <Typography variant="body1" align="center" my={2}>
-                    No matching OSM ways found
+                <Typography variant="body2" color="text.secondary">
+                  {summarizeSurfaceDistances(selectedSegmentTerrain.surface_distances) || 'No surface tags found'}
                 </Typography>
-            );
-        }
-
-        return (
-            <>
-                <Typography variant="h6" gutterBottom>
-                    Matching OSM Ways
-                </Typography>
-                <TableContainer component={Paper}>
-                    <Table size="small">
-                        <TableHead>
-                            <TableRow>
-                                <TableCell>OSM ID</TableCell>
-                                <TableCell>Highway Type</TableCell>
-                                <TableCell>Match Type</TableCell>
-                                <TableCell align="right">Distance</TableCell>
-                                <TableCell align="right">Confidence</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {wayMatches.map((match) => (
-                                <TableRow key={match.way.id}>
-                                    <TableCell>
-                                        <a
-                                            href={`https://www.openstreetmap.org/way/${match.way.id}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                        >
-                                            {match.way.id}
-                                        </a>
-                                    </TableCell>
-                                    <TableCell>{match.way.tags.highway || 'unknown'}</TableCell>
-                                    <TableCell>{match.match_type}</TableCell>
-                                    <TableCell align="right">{match.distance.toFixed(1)}m</TableCell>
-                                    <TableCell align="right">
-                                        {(match.confidence * 100).toFixed(0)}%
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </>
-        );
-    };
-
-    useEffect(() => {
-        const decodedPoints = processActivityData(activity);
-        if (!decodedPoints) return;
-
-        // Initialize map if needed
-        if (!mapInstanceRef.current) {
-            mapInstanceRef.current = initializeMap(mapRef.current);
-        }
-
-        // Clear existing layers
-        clearMapLayers(mapInstanceRef.current);
-
-        // Create main route
-        const mainRoute = createMainRoutePolyline(mapInstanceRef.current, decodedPoints);
-
-        // Process segments
-        if (activity.segments?.length > 0) {
-            const sortedSegments = sortSegmentsByPosition(activity.segments);
-            const selectedSegment = selectedSegmentId ? 
-                sortedSegments.find(s => s.segment.id.toString() === selectedSegmentId) : 
-                null;
-
-            sortedSegments.forEach(async (segment, index) => {
-                if (segment.start_index !== undefined && segment.end_index !== undefined) {
-                    const segmentPoints = decodedPoints.slice(
-                        segment.start_index,
-                        segment.end_index + 1
-                    );
-                    const isSelected = selectedSegmentId === segment.segment.id.toString();
-                    
-                    const polyline = createSegmentPolyline(
-                        mapInstanceRef.current,
-                        segmentPoints,
-                        segment,
-                        isSelected
-                    );
-
-                    polyline.on('click', () => onSegmentClick(segment.segment.id));
-
-                    if (isSelected) {
-                        const terrainInfo = await handleSegmentSelection(
-                            segment,
-                            index,
-                            sortedSegments.length
-                        );
-                        polyline.bindPopup(createSegmentPopup(
-                            segment,
-                            index,
-                            sortedSegments.length,
-                            terrainInfo
-                        ));
-                    }
-                }
-            });
-
-            // Fit map to selected segment or main route
-            if (selectedSegment) {
-                const selectedPoints = decodedPoints.slice(
-                    selectedSegment.start_index,
-                    selectedSegment.end_index + 1
-                );
-                fitMapToSegment(mapInstanceRef.current, selectedPoints);
-            } else {
-                mapInstanceRef.current.fitBounds(mainRoute.getBounds());
-            }
-        }
-    }, [activity, selectedSegmentId, onSegmentClick]);
-
-    return (
-        <Box>
-            <div 
-                ref={mapRef} 
-                style={{ 
-                    height: '400px', 
-                    width: '100%',
-                    marginTop: '20px',
-                    marginBottom: '20px',
-                    border: '1px solid #ccc',
-                    borderRadius: '4px'
-                }}
-            />
-            {renderSegmentDetails()}
-            {selectedSegmentId && (
-                <>
-                    <Divider sx={{ my: 2 }} />
-                    {renderWayMatches()}
-                </>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Terrain data is unavailable for this segment.
+              </Typography>
             )}
-        </Box>
-    );
+          </Paper>
+
+          {wayMatchesLoading ? (
+            <Box display="flex" justifyContent="center" py={2}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <WayMatchDetails matches={wayMatches} />
+          )}
+        </>
+      )}
+    </Box>
+  );
 };
 
-export default ActivityMap; 
+export default ActivityMap;

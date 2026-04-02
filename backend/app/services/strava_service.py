@@ -57,10 +57,7 @@ class StravaService:
         """Get segments from an activity."""
         try:
             activity = await self.get_activity(activity_id, access_token)
-            return [
-                StravaSegmentEffort(**effort)
-                for effort in activity.segment_efforts
-            ]
+            return activity.segment_efforts
         except Exception as e:
             print(f"Error getting activity segments: {str(e)}")
             raise

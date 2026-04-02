@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Union
-from pydantic import BaseModel, Field, validator
+from typing import Optional, List, Dict
+from pydantic import BaseModel, Field, field_validator
 
 @dataclass
 class TerrainQuery:
@@ -10,7 +10,7 @@ class TerrainQuery:
     end_lat: float
     end_lon: float
     polyline: Optional[str] = None
-    distance_threshold: float = 0.0001
+    distance_threshold: float = 25.0
 
     def __post_init__(self):
         """Validate coordinates after initialization."""
@@ -34,8 +34,12 @@ class TerrainInfo(BaseModel):
     highways: List[str] = Field(default_factory=list)
     surface_distances: Dict[str, float] = Field(default_factory=dict)
     natural_percentage: float = 0.0
+    total_distance: float = 0.0
+    matched_distance: float = 0.0
+    unmatched_distance: float = 0.0
 
-    @validator('natural_percentage')
+    @field_validator('natural_percentage')
+    @classmethod
     def validate_percentage(cls, v):
         """Validate that percentage is between 0 and 100."""
         if not 0 <= v <= 100:
@@ -49,7 +53,7 @@ class TerrainRequest(BaseModel):
     end_lat: float = Field(..., ge=-90, le=90)
     end_lon: float = Field(..., ge=-180, le=180)
     polyline: Optional[str] = None
-    distance_threshold: float = Field(default=0.0001, gt=0)
+    distance_threshold: float = Field(default=25.0, gt=0)
 
     def to_terrain_query(self) -> TerrainQuery:
         """Convert to TerrainQuery instance."""
