@@ -136,7 +136,16 @@ export const fetchTerrainData = async (route) => {
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch terrain data');
+    let detail = `Terrain request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (body?.detail !== undefined) {
+        detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
   }
 
   return response.json();

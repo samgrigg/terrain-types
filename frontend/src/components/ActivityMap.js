@@ -216,15 +216,20 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
       }
     });
 
-    if (selectedSegment) {
-      const selectedPoints = decodedPoints.slice(
-        selectedSegment.start_index,
-        selectedSegment.end_index + 1,
-      );
-      fitMapToSegment(mapInstanceRef.current, selectedPoints);
-    } else {
-      mapInstanceRef.current.fitBounds(mainRoute.getBounds());
-    }
+    const map = mapInstanceRef.current;
+    const applyBounds = () => {
+      map.invalidateSize();
+      if (selectedSegment) {
+        const selectedPoints = decodedPoints.slice(
+          selectedSegment.start_index,
+          selectedSegment.end_index + 1,
+        );
+        fitMapToSegment(map, selectedPoints);
+      } else {
+        map.fitBounds(mainRoute.getBounds());
+      }
+    };
+    requestAnimationFrame(applyBounds);
 
     return undefined;
   }, [decodedPoints, onSegmentClick, selectedSegment, selectedSegmentId, selectedSegmentTerrain, sortedSegments]);
@@ -240,6 +245,8 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
           marginBottom: '20px',
           border: '1px solid #ccc',
           borderRadius: '4px',
+          position: 'relative',
+          zIndex: 0,
         }}
       />
 

@@ -38,7 +38,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="/Users/compy/dev/play/terrain-types/backend/venv"
+VIRTUAL_ENV="/Users/compy/dev/learn/terrain-types/backend/venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

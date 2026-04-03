@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
@@ -22,13 +23,36 @@ from app.services.way_matching_service import WayMatchingService
 from app.utils.overpass_client import OverpassClient
 from app.utils.strava_client import StravaClient
 
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-allowed_origins = sorted({settings.FRONTEND_URL.rstrip("/"), "http://localhost:3000"})
+
+def _cors_allowed_origins() -> List[str]:
+    """Origins permitted for CORS. localhost vs 127.0.0.1 are different browser origins."""
+    origins = {
+        settings.FRONTEND_URL.rstrip("/"),
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    }
+    if settings.CORS_ORIGINS:
+        for part in settings.CORS_ORIGINS.split(","):
+            o = part.strip().rstrip("/")
+            if o:
+                origins.add(o)
+    return sorted(origins)
+
+
+allowed_origins = _cors_allowed_origins()
+print(f"Allowed CORS origins: {allowed_origins}")
+
+# Browsers treat each port as a different origin; CRA often uses 3001+ if 3000 is taken.
+# This regex allows http(s)://localhost or 127.0.0.1 on any port (still local-only).
+_LOCALHOST_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=_LOCALHOST_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -222,6 +246,7 @@ async def get_terrain_info(request: TerrainRequest) -> TerrainInfo:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("Terrain request failed: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
