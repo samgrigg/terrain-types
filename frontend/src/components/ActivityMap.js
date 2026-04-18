@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { encode } from '@mapbox/polyline';
 import {
   Box,
@@ -15,7 +15,12 @@ import {
 } from '@mui/material';
 
 import WayMatchDetails from './WayMatchDetails';
-import { formatTerrainInfo, getTerrainData } from '../utils/terrainUtils';
+import {
+  colorForTerrainData,
+  formatTerrainInfo,
+  getTerrainData,
+  TERRAIN_COLOR_LOADING,
+} from '../utils/terrainUtils';
 import {
   clearMapLayers,
   createMainRoutePolyline,
@@ -47,9 +52,16 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
   const [selectedSegmentTerrainLoading, setSelectedSegmentTerrainLoading] = useState(false);
   const [wayMatches, setWayMatches] = useState([]);
   const [wayMatchesLoading, setWayMatchesLoading] = useState(false);
+  const [segmentTerrainById, setSegmentTerrainById] = useState({});
 
-  const decodedPoints = processActivityData(activity);
-  const sortedSegments = sortSegmentsByPosition(activity?.segments || []);
+  const decodedPoints = useMemo(
+    () => processActivityData(activity),
+    [activity?.map?.polyline],
+  );
+  const sortedSegments = useMemo(
+    () => sortSegmentsByPosition(activity?.segments || []),
+    [activity?.segments],
+  );
   const selectedSegment = sortedSegments.find(
     (segment) => segment.segment.id.toString() === selectedSegmentId,
   );
@@ -90,6 +102,45 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
       cancelled = true;
     };
   }, [activity]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!activity?.id || !decodedPoints || sortedSegments.length === 0) {
+      setSegmentTerrainById({});
+      return undefined;
+    }
+
+    const loadSegmentTerrains = async () => {
+      const pairs = await Promise.all(
+        sortedSegments.map(async (seg) => {
+          const segmentPoints = decodedPoints.slice(seg.start_index, seg.end_index + 1);
+          if (segmentPoints.length < 2) {
+            return [seg.segment.id, null];
+          }
+          const polyline = encode(segmentPoints);
+          try {
+            const terrain = await getTerrainData(
+              { id: seg.segment.id, polyline, distance_threshold: 25 },
+              `segment_${seg.segment.id}`,
+            );
+            return [seg.segment.id, terrain];
+          } catch {
+            return [seg.segment.id, null];
+          }
+        }),
+      );
+      if (!cancelled) {
+        setSegmentTerrainById(Object.fromEntries(pairs));
+      }
+    };
+
+    loadSegmentTerrains();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activity?.id, decodedPoints, sortedSegments]);
 
   useEffect(() => {
     let cancelled = false;
@@ -200,11 +251,18 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
       }
 
       const isSelected = selectedSegmentId === segment.segment.id.toString();
+      const terrainRow = segmentTerrainById[segment.segment.id];
+      const lineColor = isSelected
+        ? undefined
+        : (terrainRow === undefined
+          ? TERRAIN_COLOR_LOADING
+          : colorForTerrainData(terrainRow));
       const polyline = createSegmentPolyline(
         mapInstanceRef.current,
         segmentPoints,
         segment,
         isSelected,
+        lineColor,
       );
 
       polyline.on('click', () => onSegmentClick(segment.segment.id));
@@ -232,7 +290,15 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
     requestAnimationFrame(applyBounds);
 
     return undefined;
-  }, [decodedPoints, onSegmentClick, selectedSegment, selectedSegmentId, selectedSegmentTerrain, sortedSegments]);
+  }, [
+    decodedPoints,
+    onSegmentClick,
+    selectedSegment,
+    selectedSegmentId,
+    selectedSegmentTerrain,
+    sortedSegments,
+    segmentTerrainById,
+  ]);
 
   return (
     <Box>

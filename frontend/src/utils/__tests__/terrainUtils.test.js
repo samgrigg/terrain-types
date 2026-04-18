@@ -4,10 +4,14 @@ import {
   buildTerrainRequest,
   cacheTerrainData,
   calculateNaturalSurfacePercentage,
+  colorForSurface,
+  colorForTerrainData,
+  dominantSurfaceFromTerrain,
   fetchTerrainData,
   formatTerrainInfo,
   generateSegmentColor,
   getCachedTerrainData,
+  TERRAIN_COLOR_FALLBACK,
 } from '../terrainUtils';
 
 jest.mock('@mapbox/polyline', () => ({
@@ -39,6 +43,30 @@ describe('terrainUtils', () => {
   it('generates consistent uppercase colors for the same segment id', () => {
     expect(generateSegmentColor(123)).toBe(generateSegmentColor(123));
     expect(generateSegmentColor(123)).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it('maps dominant surface from terrain distances', () => {
+    expect(
+      dominantSurfaceFromTerrain({
+        surface_distances: { asphalt: 100, gravel: 50 },
+      }),
+    ).toBe('asphalt');
+    expect(dominantSurfaceFromTerrain({})).toBeNull();
+  });
+
+  it('maps surface names to terrain line colors', () => {
+    expect(colorForSurface('asphalt')).toBe('#1A1A1A');
+    expect(colorForSurface('dirt')).toBe('#8B5A2B');
+    expect(colorForSurface('unknown')).toBe(TERRAIN_COLOR_FALLBACK);
+    expect(colorForSurface('weird_surface_xyz')).toBe(TERRAIN_COLOR_FALLBACK);
+  });
+
+  it('derives line color from terrain payload', () => {
+    expect(
+      colorForTerrainData({
+        surface_distances: { dirt: 200, asphalt: 10 },
+      }),
+    ).toBe('#8B5A2B');
   });
 
   it('calculates natural surface percentage from route surfaces', () => {

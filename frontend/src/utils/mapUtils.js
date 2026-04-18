@@ -1,6 +1,5 @@
 import * as L from 'leaflet';
 import { decode } from '@mapbox/polyline';
-import { generateSegmentColor } from './terrainUtils';
 
 export const initializeMap = (mapRef) => {
     const map = L.map(mapRef).setView([0, 0], 2);
@@ -26,8 +25,8 @@ export const createMainRoutePolyline = (map, decodedPoints) => {
     }).addTo(map);
 };
 
-export const createSegmentPolyline = (map, points, segment, isSelected) => {
-    const color = isSelected ? '#ff0000' : generateSegmentColor(segment.segment.id);
+export const createSegmentPolyline = (map, points, segment, isSelected, lineColor) => {
+    const color = isSelected ? '#ff0000' : (lineColor ?? '#8E8E8E');
     return L.polyline(points, {
         color,
         weight: isSelected ? 7 : 5,

@@ -21,6 +21,10 @@ class Settings(BaseSettings):
         "https://overpass.kumi.systems/api/interpreter,"
         "https://overpass.openstreetmap.fr/api/interpreter"
     )
+    # Space out Overpass calls to reduce HTTP 429 (public instances are strict).
+    OVERPASS_MIN_INTERVAL_SEC: float = 1.25
+    # Max concurrent Overpass requests from this process (1 = fully serialized).
+    OVERPASS_MAX_CONCURRENT: int = 1
     STRAVA_API_URL: str = "https://www.strava.com/api/v3"
     FRONTEND_URL: str = "http://localhost:3000"
     # Comma-separated extra allowed browser origins for CORS (e.g. http://127.0.0.1:5173).

@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 import aiohttp
 
-from ..config import overpass_endpoints
+from ..config import overpass_endpoints, settings
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,43 @@ _OVERPASS_STATEMENT_TIMEOUT = 90
 # aiohttp must wait long enough for Overpass to respond.
 _HTTP_TOTAL_TIMEOUT = 180.0
 _TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
-_PER_ENDPOINT_ATTEMPTS = 2
+_PER_ENDPOINT_ATTEMPTS = 3
 _BACKOFF_SEC = 1.5
+_BACKOFF_429_SEC = 4.0
+
+
+class AsyncIntervalLimiter:
+    """Ensures at least `min_interval` seconds between *starts* of gated operations."""
+
+    def __init__(self, min_interval: float) -> None:
+        self._min_interval = max(0.0, min_interval)
+        self._lock = asyncio.Lock()
+        self._next_allowed = 0.0
+
+    async def acquire(self) -> None:
+        if self._min_interval <= 0:
+            return
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            wait = max(0.0, self._next_allowed - now)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._next_allowed = loop.time() + self._min_interval
+
+
+def _overpass_limiter() -> AsyncIntervalLimiter:
+    return AsyncIntervalLimiter(settings.OVERPASS_MIN_INTERVAL_SEC)
+
+
+def _overpass_semaphore() -> asyncio.Semaphore:
+    n = max(1, settings.OVERPASS_MAX_CONCURRENT)
+    return asyncio.Semaphore(n)
+
+
+# Process-wide: shared across all OverpassClient instances (terrain + way match).
+_overpass_gate = _overpass_semaphore()
+_overpass_interval = _overpass_limiter()
 
 
 class TransientOverpassError(Exception):
@@ -33,29 +68,31 @@ class OverpassClient:
         self.endpoints = endpoints or overpass_endpoints()
 
     async def _post_interpreter(self, url: str, query: str) -> Dict[str, Any]:
-        timeout = aiohttp.ClientTimeout(total=_HTTP_TOTAL_TIMEOUT)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            try:
-                async with session.post(url, data={"data": query}) as response:
-                    text = await response.text()
-            except aiohttp.ClientError as exc:
-                raise TransientOverpassError(0, f"Connection error: {exc}") from exc
-
-            if response.status == 200:
+        async with _overpass_gate:
+            await _overpass_interval.acquire()
+            timeout = aiohttp.ClientTimeout(total=_HTTP_TOTAL_TIMEOUT)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 try:
-                    return json.loads(text)
-                except json.JSONDecodeError as exc:
-                    raise RuntimeError(
-                        f"Overpass returned non-JSON (HTTP {response.status}): {text[:300]}"
-                    ) from exc
+                    async with session.post(url, data={"data": query}) as response:
+                        text = await response.text()
+                except aiohttp.ClientError as exc:
+                    raise TransientOverpassError(0, f"Connection error: {exc}") from exc
 
-            snippet = text[:500].replace("\n", " ")
-            if response.status in _TRANSIENT_STATUSES:
-                raise TransientOverpassError(
-                    response.status,
-                    f"HTTP {response.status}: {snippet or '(empty body)'}",
-                )
-            raise RuntimeError(f"Overpass API HTTP {response.status}: {snippet or '(empty body)'}")
+                if response.status == 200:
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError as exc:
+                        raise RuntimeError(
+                            f"Overpass returned non-JSON (HTTP {response.status}): {text[:300]}"
+                        ) from exc
+
+                snippet = text[:500].replace("\n", " ")
+                if response.status in _TRANSIENT_STATUSES:
+                    raise TransientOverpassError(
+                        response.status,
+                        f"HTTP {response.status}: {snippet or '(empty body)'}",
+                    )
+                raise RuntimeError(f"Overpass API HTTP {response.status}: {snippet or '(empty body)'}")
 
     async def _post_with_failover(self, query: str) -> Dict[str, Any]:
         last_error: Exception | None = None
@@ -77,7 +114,10 @@ class OverpassClient:
                         exc,
                     )
                     if attempt + 1 < _PER_ENDPOINT_ATTEMPTS:
-                        await asyncio.sleep(_BACKOFF_SEC * (attempt + 1))
+                        if exc.status == 429:
+                            await asyncio.sleep(_BACKOFF_429_SEC * (attempt + 1))
+                        else:
+                            await asyncio.sleep(_BACKOFF_SEC * (attempt + 1))
                     else:
                         break
                 except aiohttp.ClientError as exc:
