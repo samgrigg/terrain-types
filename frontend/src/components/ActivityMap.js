@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import axios from 'axios';
 import { encode } from '@mapbox/polyline';
 import {
   Box,
@@ -26,6 +27,11 @@ import {
   processActivityData,
   sortSegmentsByPosition,
 } from '../utils/mapUtils';
+import { segmentNamesForRun } from '../utils/segmentNames';
+import { averageGradePercentForRun } from '../utils/streamGrade';
+import TerrainRunsTable from './TerrainRunsTable';
+
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const formatDistance = (distanceMeters) => `${(distanceMeters / 1000).toFixed(1)} km`;
 
@@ -42,11 +48,13 @@ const ActivityMap = ({ activity }) => {
   const [activityTerrain, setActivityTerrain] = useState(null);
   const [activityTerrainLoading, setActivityTerrainLoading] = useState(false);
   const [segmentTerrainById, setSegmentTerrainById] = useState({});
+  const [streams, setStreams] = useState(null);
+  const [streamsLoading, setStreamsLoading] = useState(false);
 
-  const decodedPoints = useMemo(
-    () => processActivityData(activity),
-    [activity?.map?.polyline],
-  );
+  const decodedPoints = useMemo(() => processActivityData(activity), [
+    activity?.map?.polyline,
+    activity?.id,
+  ]);
   const sortedSegments = useMemo(
     () => sortSegmentsByPosition(activity?.segments || []),
     [activity?.segments],
@@ -88,6 +96,50 @@ const ActivityMap = ({ activity }) => {
       cancelled = true;
     };
   }, [activity]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!activity?.id || !activity?.map?.polyline) {
+      setStreams(null);
+      setStreamsLoading(false);
+      return undefined;
+    }
+
+    const loadStreams = async () => {
+      setStreamsLoading(true);
+      try {
+        const access_token = localStorage.getItem('strava_token');
+        const refresh_token = localStorage.getItem('strava_refresh_token');
+        const expires_at = localStorage.getItem('strava_token_expires_at');
+        const response = await axios.get(`${API_URL}/api/activities/${activity.id}/streams`, {
+          params: {
+            access_token,
+            refresh_token,
+            expires_at,
+            keys: 'distance,altitude',
+          },
+        });
+        if (!cancelled) {
+          setStreams(response.data);
+        }
+      } catch {
+        if (!cancelled) {
+          setStreams(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setStreamsLoading(false);
+        }
+      }
+    };
+
+    loadStreams();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activity?.id, activity?.map?.polyline]);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,8 +215,42 @@ const ActivityMap = ({ activity }) => {
     return undefined;
   }, [decodedPoints, sortedSegments, segmentTerrainById]);
 
+  const segmentLabelForRun = useCallback(
+    (run) => segmentNamesForRun(sortedSegments, run),
+    [sortedSegments],
+  );
+
+  const gradeLabelForRun = useCallback(
+    (run) => {
+      if (streamsLoading || streams == null || !decodedPoints) {
+        return '—';
+      }
+      const g = averageGradePercentForRun(decodedPoints, streams, run);
+      if (g == null) {
+        return '—';
+      }
+      return `${g.toFixed(1)}%`;
+    },
+    [decodedPoints, streams, streamsLoading],
+  );
+
   return (
     <Box>
+      {!decodedPoints && (
+        <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            No GPS polyline for this activity; terrain breakdown and map are unavailable.
+          </Typography>
+        </Paper>
+      )}
+
+      <TerrainRunsTable
+        runs={activityTerrain?.runs}
+        loading={activityTerrainLoading}
+        segmentLabelForRun={segmentLabelForRun}
+        gradeLabelForRun={gradeLabelForRun}
+      />
+
       <div
         ref={mapRef}
         style={{
