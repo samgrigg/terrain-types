@@ -100,3 +100,33 @@ async def test_terrain_service_marks_unmatched_distance_as_unknown():
     assert result.matched_distance == 0.0
     assert result.unmatched_distance == result.total_distance
     assert result.natural_percentage == 0.0
+
+
+@pytest.mark.anyio
+async def test_terrain_service_returns_runs_matching_surface_buckets():
+    overpass_client = AsyncMock()
+    overpass_client.query_ways.return_value = [
+        build_way(
+            1,
+            {"highway": "track", "surface": "gravel", "tracktype": "grade2"},
+            ROUTE_POINTS,
+        ),
+    ]
+    service = TerrainService(overpass_client)
+    query = TerrainQuery(
+        start_lat=ROUTE_POINTS[0][0],
+        start_lon=ROUTE_POINTS[0][1],
+        end_lat=ROUTE_POINTS[-1][0],
+        end_lon=ROUTE_POINTS[-1][1],
+        polyline=polyline.encode(ROUTE_POINTS),
+        distance_threshold=25.0,
+    )
+
+    result = await service.get_terrain_info(query)
+
+    assert result.runs, "runs must be non-empty for a matched polyline"
+    assert all(r.bucket in ("paved", "dirt", "unknown") for r in result.runs)
+    assert result.runs[0].start_index == 0
+    assert result.runs[-1].end_index == len(ROUTE_POINTS) - 1
+    assert len(result.runs) == 1
+    assert result.runs[0].bucket == "dirt"

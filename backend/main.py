@@ -295,9 +295,28 @@ async def get_activities(access_token: str, refresh_token: str, expires_at: int)
             "elapsed_time": activity.get("elapsed_time", 0),
             "start_date": activity.get("start_date"),
             "has_map": bool((activity.get("map") or {}).get("summary_polyline") or (activity.get("map") or {}).get("polyline")),
+            "summary_polyline": ((activity.get("map") or {}).get("summary_polyline"))
+            or ((activity.get("map") or {}).get("polyline")),
         }
         for activity in activities
     ]
+
+
+@app.get("/api/activities/{activity_id}/streams")
+async def get_activity_streams(
+    activity_id: int,
+    access_token: str,
+    refresh_token: str,
+    expires_at: int,
+    keys: str = "distance,altitude",
+) -> Dict[str, Any]:
+    """Proxy Strava activity streams (distance/altitude) for grade computation."""
+    valid_token = get_valid_token(access_token, refresh_token, expires_at)
+    return _fetch_strava_resource(
+        f"/activities/{activity_id}/streams",
+        valid_token,
+        params={"keys": keys, "key_by_type": "true"},
+    )
 
 
 @app.get("/api/activities/{activity_id}")
@@ -314,6 +333,19 @@ async def get_activity_details(
         params={"include_all_efforts": "true"},
     )
     return _normalize_activity_details(activity)
+
+
+@app.get("/api/athlete")
+async def get_athlete(access_token: str, refresh_token: str, expires_at: int) -> Dict[str, Any]:
+    """Public athlete profile for the authenticated user (feed rider label)."""
+    valid_token = get_valid_token(access_token, refresh_token, expires_at)
+    athlete = _fetch_strava_resource("/athlete", valid_token)
+    return {
+        "id": athlete.get("id"),
+        "firstname": athlete.get("firstname"),
+        "lastname": athlete.get("lastname"),
+        "username": athlete.get("username"),
+    }
 
 
 @app.get("/api/activities/download")

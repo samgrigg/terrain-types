@@ -102,6 +102,7 @@ async def test_get_activities_returns_simplified_payload(client, monkeypatch):
             "elapsed_time": 3700,
             "start_date": "2026-04-01T12:00:00Z",
             "has_map": True,
+            "summary_polyline": "abc",
         }
     ]
 
@@ -241,3 +242,30 @@ async def test_match_segment_to_ways_uses_strava_segment_polyline(client, monkey
     payload = response.json()
     assert payload[0]["way"]["id"] == 11
     assert payload[0]["confidence"] == 0.88
+
+
+@pytest.mark.anyio
+async def test_get_activity_streams_proxies_strava(client, monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "_fetch_strava_resource",
+        lambda path, access_token, params=None: {
+            "distance": {"data": [0, 10]},
+            "altitude": {"data": [100, 110]},
+        },
+    )
+
+    response = await client.get(
+        "/api/activities/42/streams",
+        params={
+            "access_token": "token",
+            "refresh_token": "refresh",
+            "expires_at": 9999999999,
+            "keys": "distance,altitude",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["distance"]["data"] == [0, 10]
+    assert body["altitude"]["data"] == [100, 110]
