@@ -55,6 +55,10 @@ npm start
 2. Click "Connect with Strava" to authenticate
 3. Once authenticated, you can view and download your activities
 
+## Deployment
+
+Deployment automation and hosting instructions are in [DEPLOYMENT.md](/Users/compy/dev/learn/terrain-types/DEPLOYMENT.md).
+
 ## API Endpoints
 - `POST /api/auth/strava`: Authenticate with Strava
 - `GET /api/activities`: Get user's activities

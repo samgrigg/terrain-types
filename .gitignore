@@ -11,3 +11,5 @@ backend/venv/bin
 
 *.py[cod]
 *$py.class
+
+.superpowers/

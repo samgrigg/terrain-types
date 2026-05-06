@@ -15,6 +15,26 @@ export const TERRAIN_COLOR_NATURAL = '#C4822A';
 /** Dull gray for all paved surfaces */
 export const TERRAIN_COLOR_PAVED = '#787878';
 
+/** Collapsed terrain buckets (feed SVG + detail table) */
+export const BUCKET_COLORS = {
+  paved: TERRAIN_COLOR_PAVED,
+  dirt: TERRAIN_COLOR_NATURAL,
+  unknown: TERRAIN_COLOR_LOADING,
+};
+
+export const dirtMilesFromRuns = (runs) => {
+  if (runs == null) {
+    return null;
+  }
+  if (!runs.length) {
+    return 0;
+  }
+  const meters = runs
+    .filter((r) => r.bucket === 'dirt')
+    .reduce((sum, r) => sum + (Number(r.distance_m) || 0), 0);
+  return meters / 1609.344;
+};
+
 export const generateSegmentColor = (segmentId) => {
   let hash = 0;
   for (let i = 0; i < segmentId.toString().length; i += 1) {
@@ -115,7 +135,7 @@ export const formatTerrainInfo = (terrainData) => {
 };
 
 export const getCachedTerrainData = (cacheKey) => {
-  const cachedData = localStorage.getItem(`terrain_${cacheKey}_v2`);
+  const cachedData = localStorage.getItem(`terrain_${cacheKey}_v3`);
   if (!cachedData) {
     return null;
   }
@@ -129,7 +149,7 @@ export const getCachedTerrainData = (cacheKey) => {
 };
 
 export const cacheTerrainData = (cacheKey, data) => {
-  localStorage.setItem(`terrain_${cacheKey}_v2`, JSON.stringify({
+  localStorage.setItem(`terrain_${cacheKey}_v3`, JSON.stringify({
     data,
     timestamp: Date.now(),
   }));

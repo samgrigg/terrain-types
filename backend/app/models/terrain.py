@@ -1,6 +1,18 @@
 from dataclasses import dataclass
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Literal
 from pydantic import BaseModel, Field, field_validator
+
+Bucket = Literal["paved", "dirt", "unknown"]
+
+
+class TerrainRun(BaseModel):
+    """Contiguous stretch of route with a single terrain bucket (mobile UI / polyline coloring)."""
+
+    start_index: int = Field(..., ge=0, description="Start vertex index on decoded polyline")
+    end_index: int = Field(..., ge=0, description="End vertex index (inclusive)")
+    bucket: Bucket
+    distance_m: float = Field(..., ge=0, description="Length along route for this run, meters")
+
 
 @dataclass
 class TerrainQuery:
@@ -37,6 +49,10 @@ class TerrainInfo(BaseModel):
     total_distance: float = 0.0
     matched_distance: float = 0.0
     unmatched_distance: float = 0.0
+    runs: List[TerrainRun] = Field(
+        default_factory=list,
+        description="Ordered contiguous terrain buckets along the polyline for coloring / breakdown UI",
+    )
 
     @field_validator('natural_percentage')
     @classmethod

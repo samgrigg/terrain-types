@@ -1,10 +1,11 @@
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 import math
+import re
 
 import polyline
 
-from ..models.terrain import TerrainInfo, TerrainQuery
+from ..models.terrain import TerrainInfo, TerrainQuery, TerrainRun
 
 
 Coordinate = Tuple[float, float]
@@ -12,6 +13,11 @@ Coordinate = Tuple[float, float]
 
 class TerrainService:
     """Service for matching route geometry to OSM ways and inferring terrain."""
+
+    _PAVED_PATTERN = re.compile(
+        r"(asphalt|concrete|\bpaved\b|paving|tarmac|bitumen|cobblestone|sett|metal|chipseal|brick)",
+        re.IGNORECASE,
+    )
 
     NATURAL_SURFACES = {
         "bridleway",
@@ -51,8 +57,25 @@ class TerrainService:
         tracktypes = set()
         highways = set()
         surface_distances = defaultdict(float)
+        terrain_runs: List[TerrainRun] = []
+        run_bucket: Optional[str] = None
+        run_start_vertex = 0
+        run_distance_m = 0.0
 
-        for start, end in zip(route_points, route_points[1:]):
+        def flush_run(end_vertex: int) -> None:
+            nonlocal run_bucket, run_start_vertex, run_distance_m
+            if run_bucket is None:
+                return
+            terrain_runs.append(
+                TerrainRun(
+                    start_index=run_start_vertex,
+                    end_index=end_vertex,
+                    bucket=run_bucket,
+                    distance_m=round(run_distance_m, 1),
+                )
+            )
+
+        for edge_index, (start, end) in enumerate(zip(route_points, route_points[1:])):
             segment_length = self._haversine_distance(start[0], start[1], end[0], end[1])
             if segment_length == 0:
                 continue
@@ -76,6 +99,22 @@ class TerrainService:
 
             surfaces.add(surface)
             surface_distances[surface] += segment_length
+
+            bucket = self._surface_to_bucket(surface, matched=bool(best_match))
+            if run_bucket is None:
+                run_bucket = bucket
+                run_start_vertex = edge_index
+                run_distance_m = segment_length
+            elif bucket == run_bucket:
+                run_distance_m += segment_length
+            else:
+                flush_run(edge_index)
+                run_bucket = bucket
+                run_start_vertex = edge_index
+                run_distance_m = segment_length
+
+        if run_bucket is not None and len(route_points) >= 2:
+            flush_run(len(route_points) - 1)
 
         natural_distance = sum(
             distance
@@ -101,6 +140,7 @@ class TerrainService:
             total_distance=round(total_distance, 1),
             matched_distance=round(matched_distance, 1),
             unmatched_distance=round(unmatched_distance, 1),
+            runs=terrain_runs,
         )
 
     def _get_route_points(self, query: TerrainQuery) -> List[Coordinate]:
@@ -209,6 +249,19 @@ class TerrainService:
     def _is_natural_surface(self, surface: str) -> bool:
         normalized = surface.lower()
         return normalized in self.NATURAL_SURFACES or normalized in self.NATURAL_TRACKTYPES
+
+    def _surface_to_bucket(self, surface: str, matched: bool) -> str:
+        """Collapse OSM-derived surfaces to paved | dirt | unknown for UI continuity."""
+        if not matched:
+            return "unknown"
+        if not surface or surface == "unknown":
+            return "unknown"
+        sl = surface.lower()
+        if self._PAVED_PATTERN.search(sl):
+            return "paved"
+        if self._is_natural_surface(surface):
+            return "dirt"
+        return "unknown"
 
     def _point_to_segment_distance(
         self,
