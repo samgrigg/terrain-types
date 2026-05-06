@@ -91,14 +91,8 @@ describe('mapUtils', () => {
 
   it('creates route and segment polylines with the expected styles', () => {
     createMainRoutePolyline(map, [[0, 0], [1, 1]]);
-    createSegmentPolyline(map, [[0, 0], [1, 1]], { segment: { id: 123 } }, true);
-    createSegmentPolyline(
-      map,
-      [[2, 2], [3, 3]],
-      { segment: { id: 456 } },
-      false,
-      '#8B5A2B',
-    );
+    createSegmentPolyline(map, [[0, 0], [1, 1]], undefined);
+    createSegmentPolyline(map, [[2, 2], [3, 3]], '#8B5A2B');
 
     expect(L.polyline).toHaveBeenNthCalledWith(1, [[0, 0], [1, 1]], {
       color: '#666666',
@@ -106,9 +100,9 @@ describe('mapUtils', () => {
       opacity: 0.5,
     });
     expect(L.polyline).toHaveBeenNthCalledWith(2, [[0, 0], [1, 1]], {
-      color: '#ff0000',
-      weight: 7,
-      opacity: 0.9,
+      color: '#8E8E8E',
+      weight: 5,
+      opacity: 0.7,
     });
     expect(L.polyline).toHaveBeenNthCalledWith(3, [[2, 2], [3, 3]], {
       color: '#8B5A2B',

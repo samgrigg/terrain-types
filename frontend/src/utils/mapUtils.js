@@ -3,8 +3,10 @@ import { decode } from '@mapbox/polyline';
 
 export const initializeMap = (mapRef) => {
     const map = L.map(mapRef).setView([0, 0], 2);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap contributors © CARTO',
+        subdomains: 'abcd',
+        maxZoom: 20,
     }).addTo(map);
     return map;
 };
@@ -25,12 +27,11 @@ export const createMainRoutePolyline = (map, decodedPoints) => {
     }).addTo(map);
 };
 
-export const createSegmentPolyline = (map, points, segment, isSelected, lineColor) => {
-    const color = isSelected ? '#ff0000' : (lineColor ?? '#8E8E8E');
+export const createSegmentPolyline = (map, points, lineColor) => {
     return L.polyline(points, {
-        color,
-        weight: isSelected ? 7 : 5,
-        opacity: isSelected ? 0.9 : 0.7
+        color: lineColor ?? '#8E8E8E',
+        weight: 5,
+        opacity: 0.7,
     }).addTo(map);
 };
 

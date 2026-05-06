@@ -87,10 +87,9 @@ function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Get activity and segment IDs from URL if present
+  // Get activity ID from URL if present
   const urlParams = new URLSearchParams(location.search);
   const activityId = urlParams.get('activity');
-  const segmentId = urlParams.get('segment');
   const authError = urlParams.get('error');
 
   const handleActivityClick = useCallback(async (activity, updateUrl = false) => {
@@ -246,10 +245,6 @@ function MainApp() {
   }, []);
 
 
-  const handleSegmentClick = useCallback((segmentId) => {
-    navigate(`/?activity=${selectedActivity.id}&segment=${segmentId}`, { replace: true });
-  }, [navigate, selectedActivity]);
-
   return (
     <Container maxWidth="lg">
       <Box sx={{ my: 4 }}>
@@ -332,11 +327,7 @@ function MainApp() {
                         <Typography variant="h6" gutterBottom>
                           {selectedActivity.name}
                         </Typography>
-                        <ActivityMap 
-                          activity={selectedActivity} 
-                          selectedSegmentId={segmentId}
-                          onSegmentClick={handleSegmentClick}
-                        />
+                        <ActivityMap activity={selectedActivity} />
                       </>
                     ) : (
                       <Box sx={{ p: 2, textAlign: 'center' }}>

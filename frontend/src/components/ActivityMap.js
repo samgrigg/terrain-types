@@ -3,7 +3,6 @@ import { encode } from '@mapbox/polyline';
 import {
   Box,
   CircularProgress,
-  Divider,
   Paper,
   Table,
   TableBody,
@@ -14,10 +13,8 @@ import {
   Typography,
 } from '@mui/material';
 
-import WayMatchDetails from './WayMatchDetails';
 import {
   colorForTerrainData,
-  formatTerrainInfo,
   getTerrainData,
   TERRAIN_COLOR_LOADING,
 } from '../utils/terrainUtils';
@@ -25,14 +22,10 @@ import {
   clearMapLayers,
   createMainRoutePolyline,
   createSegmentPolyline,
-  createSegmentPopup,
-  fitMapToSegment,
   initializeMap,
   processActivityData,
   sortSegmentsByPosition,
 } from '../utils/mapUtils';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const formatDistance = (distanceMeters) => `${(distanceMeters / 1000).toFixed(1)} km`;
 
@@ -43,15 +36,11 @@ const summarizeSurfaceDistances = (surfaceDistances = {}) => (
     .join(', ')
 );
 
-const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
+const ActivityMap = ({ activity }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const [activityTerrain, setActivityTerrain] = useState(null);
   const [activityTerrainLoading, setActivityTerrainLoading] = useState(false);
-  const [selectedSegmentTerrain, setSelectedSegmentTerrain] = useState(null);
-  const [selectedSegmentTerrainLoading, setSelectedSegmentTerrainLoading] = useState(false);
-  const [wayMatches, setWayMatches] = useState([]);
-  const [wayMatchesLoading, setWayMatchesLoading] = useState(false);
   const [segmentTerrainById, setSegmentTerrainById] = useState({});
 
   const decodedPoints = useMemo(
@@ -61,9 +50,6 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
   const sortedSegments = useMemo(
     () => sortSegmentsByPosition(activity?.segments || []),
     [activity?.segments],
-  );
-  const selectedSegment = sortedSegments.find(
-    (segment) => segment.segment.id.toString() === selectedSegmentId,
   );
 
   useEffect(() => {
@@ -143,95 +129,6 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
   }, [activity?.id, decodedPoints, sortedSegments]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadSelectedSegmentTerrain = async () => {
-      if (!selectedSegment || !decodedPoints) {
-        setSelectedSegmentTerrain(null);
-        setSelectedSegmentTerrainLoading(false);
-        setWayMatches([]);
-        setWayMatchesLoading(false);
-        return;
-      }
-
-      const segmentPoints = decodedPoints.slice(
-        selectedSegment.start_index,
-        selectedSegment.end_index + 1,
-      );
-      if (segmentPoints.length < 2) {
-        setSelectedSegmentTerrain(null);
-        setSelectedSegmentTerrainLoading(false);
-        setWayMatches([]);
-        setWayMatchesLoading(false);
-        return;
-      }
-
-      const polyline = encode(segmentPoints);
-      setSelectedSegmentTerrainLoading(true);
-      try {
-        const terrain = await getTerrainData(
-          {
-            id: selectedSegment.segment.id,
-            polyline,
-            distance_threshold: 25,
-          },
-          `segment_${selectedSegment.segment.id}`,
-        );
-        if (!cancelled) {
-          setSelectedSegmentTerrain(terrain);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setSelectedSegmentTerrain(null);
-        }
-        console.error('Failed to load selected segment terrain:', error);
-      } finally {
-        if (!cancelled) {
-          setSelectedSegmentTerrainLoading(false);
-        }
-      }
-
-      const accessToken = localStorage.getItem('strava_token');
-      if (!accessToken) {
-        setWayMatches([]);
-        setWayMatchesLoading(false);
-        return;
-      }
-
-      setWayMatchesLoading(true);
-      try {
-        const response = await fetch(`${API_URL}/osm/match/${selectedSegment.segment.id}`, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        if (!response.ok) {
-          throw new Error('Failed to fetch OSM way matches');
-        }
-        const matches = await response.json();
-        if (!cancelled) {
-          setWayMatches(matches);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setWayMatches([]);
-        }
-        console.error('Failed to load way matches:', error);
-      } finally {
-        if (!cancelled) {
-          setWayMatchesLoading(false);
-        }
-      }
-    };
-
-    loadSelectedSegmentTerrain();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [decodedPoints, selectedSegment]);
-
-  useEffect(() => {
     if (!decodedPoints) {
       return undefined;
     }
@@ -242,63 +139,29 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
 
     clearMapLayers(mapInstanceRef.current);
     const mainRoute = createMainRoutePolyline(mapInstanceRef.current, decodedPoints);
-    const selectedTerrainLabel = formatTerrainInfo(selectedSegmentTerrain);
 
-    sortedSegments.forEach((segment, index) => {
+    sortedSegments.forEach((segment) => {
       const segmentPoints = decodedPoints.slice(segment.start_index, segment.end_index + 1);
       if (segmentPoints.length < 2) {
         return;
       }
 
-      const isSelected = selectedSegmentId === segment.segment.id.toString();
       const terrainRow = segmentTerrainById[segment.segment.id];
-      const lineColor = isSelected
-        ? undefined
-        : (terrainRow === undefined
-          ? TERRAIN_COLOR_LOADING
-          : colorForTerrainData(terrainRow));
-      const polyline = createSegmentPolyline(
-        mapInstanceRef.current,
-        segmentPoints,
-        segment,
-        isSelected,
-        lineColor,
-      );
-
-      polyline.on('click', () => onSegmentClick(segment.segment.id));
-
-      if (isSelected) {
-        polyline.bindPopup(
-          createSegmentPopup(segment, index, sortedSegments.length, selectedTerrainLabel),
-        );
-      }
+      const lineColor = terrainRow === undefined
+        ? TERRAIN_COLOR_LOADING
+        : colorForTerrainData(terrainRow);
+      createSegmentPolyline(mapInstanceRef.current, segmentPoints, lineColor);
     });
 
     const map = mapInstanceRef.current;
     const applyBounds = () => {
       map.invalidateSize();
-      if (selectedSegment) {
-        const selectedPoints = decodedPoints.slice(
-          selectedSegment.start_index,
-          selectedSegment.end_index + 1,
-        );
-        fitMapToSegment(map, selectedPoints);
-      } else {
-        map.fitBounds(mainRoute.getBounds());
-      }
+      map.fitBounds(mainRoute.getBounds());
     };
     requestAnimationFrame(applyBounds);
 
     return undefined;
-  }, [
-    decodedPoints,
-    onSegmentClick,
-    selectedSegment,
-    selectedSegmentId,
-    selectedSegmentTerrain,
-    sortedSegments,
-    segmentTerrainById,
-  ]);
+  }, [decodedPoints, sortedSegments, segmentTerrainById]);
 
   return (
     <Box>
@@ -357,63 +220,18 @@ const ActivityMap = ({ activity, selectedSegmentId, onSegmentClick }) => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {sortedSegments.map((segment, index) => {
-              const isSelected = selectedSegmentId === segment.segment.id.toString();
-              return (
-                <TableRow
-                  key={segment.segment.id}
-                  hover
-                  selected={isSelected}
-                  onClick={() => onSegmentClick(segment.segment.id)}
-                  sx={{ cursor: 'pointer' }}
-                >
-                  <TableCell>{index + 1}</TableCell>
-                  <TableCell>{segment.segment.name}</TableCell>
-                  <TableCell align="right">{formatDistance(segment.segment.distance)}</TableCell>
-                  <TableCell align="right">{segment.segment.average_grade?.toFixed(1) ?? '0.0'}%</TableCell>
-                </TableRow>
-              );
-            })}
+            {sortedSegments.map((segment, index) => (
+              <TableRow key={segment.segment.id} hover>
+                <TableCell>{index + 1}</TableCell>
+                <TableCell>{segment.segment.name}</TableCell>
+                <TableCell align="right">{formatDistance(segment.segment.distance)}</TableCell>
+                <TableCell align="right">{segment.segment.average_grade?.toFixed(1) ?? '0.0'}%</TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </TableContainer>
 
-      {selectedSegment && (
-        <>
-          <Divider sx={{ my: 2 }} />
-          <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Selected Segment Terrain
-            </Typography>
-            {selectedSegmentTerrainLoading ? (
-              <Box display="flex" justifyContent="center" py={2}>
-                <CircularProgress size={24} />
-              </Box>
-            ) : selectedSegmentTerrain ? (
-              <>
-                <Typography variant="body1">
-                  Unpaved estimate: {selectedSegmentTerrain.natural_percentage}%
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {summarizeSurfaceDistances(selectedSegmentTerrain.surface_distances) || 'No surface tags found'}
-                </Typography>
-              </>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                Terrain data is unavailable for this segment.
-              </Typography>
-            )}
-          </Paper>
-
-          {wayMatchesLoading ? (
-            <Box display="flex" justifyContent="center" py={2}>
-              <CircularProgress size={24} />
-            </Box>
-          ) : (
-            <WayMatchDetails matches={wayMatches} />
-          )}
-        </>
-      )}
     </Box>
   );
 };

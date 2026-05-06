@@ -12,6 +12,8 @@ import {
   generateSegmentColor,
   getCachedTerrainData,
   TERRAIN_COLOR_FALLBACK,
+  TERRAIN_COLOR_NATURAL,
+  TERRAIN_COLOR_PAVED,
 } from '../terrainUtils';
 
 jest.mock('@mapbox/polyline', () => ({
@@ -55,10 +57,21 @@ describe('terrainUtils', () => {
   });
 
   it('maps surface names to terrain line colors', () => {
-    expect(colorForSurface('asphalt')).toBe('#1A1A1A');
-    expect(colorForSurface('dirt')).toBe('#8B5A2B');
+    // paved surfaces → dull gray
+    expect(colorForSurface('asphalt')).toBe(TERRAIN_COLOR_PAVED);
+    expect(colorForSurface('paved')).toBe(TERRAIN_COLOR_PAVED);
+    expect(colorForSurface('concrete')).toBe(TERRAIN_COLOR_PAVED);
+    expect(colorForSurface('cobblestone')).toBe(TERRAIN_COLOR_PAVED);
+    // natural surfaces → warm brown
+    expect(colorForSurface('dirt')).toBe(TERRAIN_COLOR_NATURAL);
+    expect(colorForSurface('gravel')).toBe(TERRAIN_COLOR_NATURAL);
+    expect(colorForSurface('sand')).toBe(TERRAIN_COLOR_NATURAL);
+    expect(colorForSurface('rock')).toBe(TERRAIN_COLOR_NATURAL);
+    expect(colorForSurface('unpaved')).toBe(TERRAIN_COLOR_NATURAL);
+    expect(colorForSurface('stepping_stones')).toBe(TERRAIN_COLOR_NATURAL);
+    // unknown → fallback gray
     expect(colorForSurface('unknown')).toBe(TERRAIN_COLOR_FALLBACK);
-    expect(colorForSurface('weird_surface_xyz')).toBe(TERRAIN_COLOR_FALLBACK);
+    expect(colorForSurface(null)).toBe(TERRAIN_COLOR_FALLBACK);
   });
 
   it('derives line color from terrain payload', () => {
@@ -66,7 +79,7 @@ describe('terrainUtils', () => {
       colorForTerrainData({
         surface_distances: { dirt: 200, asphalt: 10 },
       }),
-    ).toBe('#8B5A2B');
+    ).toBe(TERRAIN_COLOR_NATURAL);
   });
 
   it('calculates natural surface percentage from route surfaces', () => {

@@ -9,6 +9,12 @@ export const TERRAIN_COLOR_FALLBACK = '#8E8E8E';
 /** Light gray while segment terrain is still loading */
 export const TERRAIN_COLOR_LOADING = '#B5B5B5';
 
+/** Warm brown for all natural/unpaved surfaces */
+export const TERRAIN_COLOR_NATURAL = '#C4822A';
+
+/** Dull gray for all paved surfaces */
+export const TERRAIN_COLOR_PAVED = '#787878';
+
 export const generateSegmentColor = (segmentId) => {
   let hash = 0;
   for (let i = 0; i < segmentId.toString().length; i += 1) {
@@ -38,53 +44,16 @@ export const dominantSurfaceFromTerrain = (terrainData) => {
   return entries[0][0];
 };
 
-/**
- * Map normalized surface / track labels to line colors (muted, map-readable).
- */
+const PAVED_PATTERN = /(asphalt|concrete|\bpaved\b|paving|tarmac|bitumen|cobblestone|sett|metal|chipseal|brick)/;
+
 export const colorForSurface = (surfaceName) => {
   if (!surfaceName || surfaceName === 'unknown') {
     return TERRAIN_COLOR_FALLBACK;
   }
-  const s = surfaceName.toLowerCase();
-
-  if (/(asphalt|concrete|paved|paving|tarmac|bitumen|cobblestone|sett|metal|chipseal)/.test(s)) {
-    return '#1A1A1A';
+  if (PAVED_PATTERN.test(surfaceName.toLowerCase())) {
+    return TERRAIN_COLOR_PAVED;
   }
-  if (/(dirt|earth|mud|soil|ground|clay|laterite)/.test(s)) {
-    return '#8B5A2B';
-  }
-  if (/(sand)/.test(s)) {
-    return '#C9A86C';
-  }
-  if (/(gravel|fine_gravel|pebblestone|compacted|scree)/.test(s)) {
-    return '#A68F72';
-  }
-  if (/track_grade/.test(s)) {
-    return '#7A5230';
-  }
-  if (/(grass|turf|artificial_turf)/.test(s)) {
-    return '#4A7A3F';
-  }
-  if (/(rock|bedrock|stone)/.test(s)) {
-    return '#6B7580';
-  }
-  if (/(wood|woodchips|mulch)/.test(s)) {
-    return '#7D6040';
-  }
-  if (/(ice|snow|salt)/.test(s)) {
-    return '#B8C8D8';
-  }
-  if (/(water|wet)/.test(s)) {
-    return '#4A90A4';
-  }
-  if (/(brick)/.test(s)) {
-    return '#6E4A3A';
-  }
-  if (/(stepping_stones|unhewn_cobble)/.test(s)) {
-    return '#5C6670';
-  }
-
-  return TERRAIN_COLOR_FALLBACK;
+  return TERRAIN_COLOR_NATURAL;
 };
 
 export const colorForTerrainData = (terrainData) => {
