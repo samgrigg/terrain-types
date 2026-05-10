@@ -1,15 +1,25 @@
+# Frontend (Create React App)
 frontend/node_modules/
+frontend/build/
+frontend/coverage/
 frontend/.env
 frontend/.env.local
 frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
 
-backend/venv/lib
-backend/venv/bin
-**/__pycache__/**
-
+# Backend / Python
+backend/.env
+backend/venv/
+**/__pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+*.egg-info/
 
+# Tooling / local
 .superpowers/
+.DS_Store
