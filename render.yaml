@@ -28,7 +28,7 @@ services:
     plan: free
     rootDir: frontend
     buildCommand: npm ci && npm run build
-    staticPublishPath: frontend/build
+    staticPublishPath: build
     autoDeployTrigger: checksPass
     buildFilter:
       paths:
