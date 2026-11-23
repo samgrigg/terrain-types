@@ -70,12 +70,12 @@ describe('mapUtils', () => {
     L.polyline.mockReturnValue(polyline);
   });
 
-  it('initializes the map with OSM tiles', () => {
+  it('initializes the map with CARTO tiles', () => {
     initializeMap(mapRef);
 
     expect(L.map).toHaveBeenCalledWith(mapRef);
     expect(L.tileLayer).toHaveBeenCalledWith(
-      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       expect.any(Object),
     );
   });

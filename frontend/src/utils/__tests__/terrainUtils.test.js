@@ -117,11 +117,11 @@ describe('terrainUtils', () => {
     });
   });
 
-  it('caches terrain data with the v2 cache key', () => {
+  it('caches terrain data with the v3 cache key', () => {
     cacheTerrainData('activity_123', { surfaces: ['gravel'] });
 
     expect(localStorage.setItem).toHaveBeenCalledWith(
-      'terrain_activity_123_v2',
+      'terrain_activity_123_v3',
       expect.stringContaining('"surfaces":["gravel"]'),
     );
   });
@@ -147,7 +147,8 @@ describe('terrainUtils', () => {
 
     const result = await fetchTerrainData({ polyline: 'encoded' });
 
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/api/terrain', {
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+    expect(global.fetch).toHaveBeenCalledWith(`${apiUrl}/api/terrain`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

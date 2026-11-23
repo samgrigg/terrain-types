@@ -1,5 +1,5 @@
 /**
- * Project WGS84 lat/lon points into SVG coordinates (uniform scale, north-up).
+ * Project WGS84 points into a centered, north-up SVG using local geographic proportions.
  * @param {Array<[number, number]>} points
  * @param {number} width
  * @param {number} height
@@ -16,15 +16,20 @@ export function buildSvgProjection(points, width, height, padding = 4) {
   const maxLat = Math.max(...lats);
   const minLon = Math.min(...lons);
   const maxLon = Math.max(...lons);
-  const latSpan = Math.max(maxLat - minLat, 1e-8);
-  const lonSpan = Math.max(maxLon - minLon, 1e-8);
+  // Longitude degrees get shorter toward the poles. A local projection keeps
+  // ride-sized routes recognizable without adding a map dependency.
+  const longitudeScale = Math.cos(((minLat + maxLat) / 2) * Math.PI / 180);
+  const latSpan = maxLat - minLat;
+  const lonSpan = (maxLon - minLon) * longitudeScale;
   const innerW = width - 2 * padding;
   const innerH = height - 2 * padding;
-  const scale = Math.min(innerW / lonSpan, innerH / latSpan);
+  const scale = Math.min(innerW / Math.max(lonSpan, 1e-8), innerH / Math.max(latSpan, 1e-8));
+  const offsetX = (width - lonSpan * scale) / 2;
+  const offsetY = (height - latSpan * scale) / 2;
 
   const project = ([lat, lon]) => {
-    const x = padding + (lon - minLon) * scale;
-    const y = padding + (maxLat - lat) * scale;
+    const x = offsetX + (lon - minLon) * longitudeScale * scale;
+    const y = offsetY + (maxLat - lat) * scale;
     return [x, y];
   };
 
